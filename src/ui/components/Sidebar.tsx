@@ -7,11 +7,13 @@ interface SidebarProps {
   connected: boolean;
   onNewSession: () => void;
   onDeleteSession: (sessionId: string) => void;
+  onOpenSettings: () => void;
 }
 
 export function Sidebar({
   onNewSession,
-  onDeleteSession
+  onDeleteSession,
+  onOpenSettings,
 }: SidebarProps) {
   const sessions = useAppStore((state) => state.sessions);
   const activeSessionId = useAppStore((state) => state.activeSessionId);
@@ -81,7 +83,7 @@ export function Sidebar({
           + New Task
         </button>
       </div>
-      <div className="flex flex-col gap-2 overflow-y-auto">
+      <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
         {sessionList.length === 0 && (
           <div className="rounded-xl border border-ink-900/5 bg-surface px-4 py-5 text-center text-xs text-muted">
             No sessions yet. Click "+ New Task" to start.
@@ -135,6 +137,23 @@ export function Sidebar({
             </div>
           </div>
         ))}
+      </div>
+      <div className="border-t border-ink-900/5 pt-3">
+        <button
+          className="flex w-full items-center justify-between rounded-xl border border-ink-900/10 bg-surface px-3 py-2.5 text-left text-sm text-ink-700 transition-colors hover:bg-surface-tertiary hover:border-ink-900/20"
+          onClick={onOpenSettings}
+        >
+          <span className="flex items-center gap-2">
+            <svg viewBox="0 0 24 24" className="h-4 w-4 text-ink-500" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M12 3l1.6 2.5 2.9.6-.9 2.8 1.9 2.2-2.2 1.9.9 2.8-2.9.6L12 21l-1.6-2.5-2.9-.6.9-2.8-1.9-2.2 2.2-1.9-.9-2.8 2.9-.6z" />
+              <circle cx="12" cy="12" r="3.2" />
+            </svg>
+            <span>Settings</span>
+          </span>
+          <svg viewBox="0 0 24 24" className="h-4 w-4 text-ink-400" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
       </div>
       <Dialog.Root open={!!resumeSessionId} onOpenChange={(open) => !open && setResumeSessionId(null)}>
         <Dialog.Portal>

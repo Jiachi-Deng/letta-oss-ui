@@ -26,6 +26,15 @@ electron.contextBridge.exposeInMainWorld("electron", {
 
     getRecentCwds: (limit?: number) => 
         ipcInvoke("get-recent-cwds", limit),
+    getAppConfig: () =>
+        ipcInvoke("get-app-config"),
+    saveAppConfig: (config: {
+        connectionType?: "letta-server" | "anthropic-compatible" | "openai-compatible";
+        LETTA_BASE_URL?: string;
+        LETTA_API_KEY?: string;
+        model?: string;
+    }) =>
+        ipcInvoke("save-app-config", config),
     selectDirectory: () => 
         ipcInvoke("select-directory")
 } satisfies Window['electron'])

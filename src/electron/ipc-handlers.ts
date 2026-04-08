@@ -1,12 +1,17 @@
 import { BrowserWindow } from "electron";
 import type { ClientEvent, ServerEvent } from "./types.js";
+import { clearCodeIslandSession, notifyCodeIslandStop } from "./libs/codeisland.js";
 import { runLetta, type RunnerHandle } from "./libs/runner.js";
 import type { PendingPermission } from "./libs/runtime-state.js";
 import {
+  appendSessionMessage,
   createRuntimeSession,
-  getSession,
-  updateSession,
   deleteSession,
+  getSession,
+  getSessionHistory,
+  listRuntimeSessions,
+  rekeyRuntimeSession,
+  updateSession,
 } from "./libs/runtime-state.js";
 
 const DEBUG = process.env.DEBUG_IPC === "true";
@@ -39,10 +44,40 @@ function broadcast(event: ServerEvent) {
 }
 
 function emit(event: ServerEvent) {
-  // Update runtime state on status changes
   if (event.type === "session.status") {
-    updateSession(event.payload.sessionId, { status: event.payload.status });
+    const existing = getSession(event.payload.sessionId);
+    if (existing) {
+      updateSession(event.payload.sessionId, {
+        status: event.payload.status,
+        title: event.payload.title ?? existing.title,
+        cwd: event.payload.cwd ?? existing.cwd,
+        error: event.payload.error,
+      });
+    } else if (event.payload.sessionId !== "pending") {
+      createRuntimeSession(event.payload.sessionId, {
+        status: event.payload.status,
+        title: event.payload.title ?? event.payload.sessionId,
+        cwd: event.payload.cwd,
+        error: event.payload.error,
+      });
+    }
+
+    if (event.payload.status === "completed" || event.payload.status === "error") {
+      runnerHandles.delete(event.payload.sessionId);
+    }
   }
+
+  if (event.type === "stream.user_prompt") {
+    appendSessionMessage(event.payload.sessionId, {
+      type: "user_prompt",
+      prompt: event.payload.prompt,
+    });
+  }
+
+  if (event.type === "stream.message") {
+    appendSessionMessage(event.payload.sessionId, event.payload.message);
+  }
+
   broadcast(event);
 }
 
@@ -50,20 +85,20 @@ export async function handleClientEvent(event: ClientEvent) {
   debug(`handleClientEvent: ${event.type}`, { payload: 'payload' in event ? event.payload : undefined });
   
   if (event.type === "session.list") {
-    // TODO: Implement listing via letta-client once we track agentId
-    // For now, return empty - sessions are created via SDK
-    emit({ type: "session.list", payload: { sessions: [] } });
+    emit({ type: "session.list", payload: { sessions: listRuntimeSessions() } });
     return;
   }
 
   if (event.type === "session.history") {
-    // TODO: Implement history fetch via letta-client
-    // For now, return empty - messages stream in real-time
     const conversationId = event.payload.sessionId;
-    const status = getSession(conversationId)?.status || "idle";
+    const session = getSession(conversationId);
     emit({
       type: "session.history",
-      payload: { sessionId: conversationId, status, messages: [] },
+      payload: {
+        sessionId: conversationId,
+        status: session?.status ?? "idle",
+        messages: getSessionHistory(conversationId),
+      },
     });
     return;
   }
@@ -101,8 +136,12 @@ export async function handleClientEvent(event: ClientEvent) {
             conversationId = updates.lettaConversationId;
             debug("session.start: session initialized", { conversationId });
             
-            createRuntimeSession(conversationId);
-            updateSession(conversationId, { status: "running" });
+            createRuntimeSession(conversationId, {
+              title: event.payload.title || conversationId,
+              cwd: event.payload.cwd,
+              status: "running",
+              pendingPermissions,
+            });
             if (handle) runnerHandles.set(conversationId, handle);
             
             // Emit session.status to unblock UI - use conversationId as title
@@ -137,7 +176,10 @@ export async function handleClientEvent(event: ClientEvent) {
     
     if (!runtimeSession) {
       debug("session.continue: no runtime session found, creating new one");
-      runtimeSession = createRuntimeSession(conversationId);
+      runtimeSession = createRuntimeSession(conversationId, {
+        title: conversationId,
+        cwd: event.payload.cwd,
+      });
     } else {
       debug("session.continue: found existing runtime session", { status: runtimeSession.status });
     }
@@ -156,8 +198,9 @@ export async function handleClientEvent(event: ClientEvent) {
     try {
       debug("session.continue: calling runLetta", { conversationId });
       let actualConversationId = conversationId;
+      let handle: RunnerHandle | null = null;
       
-      const handle = await runLetta({
+      handle = await runLetta({
         prompt: event.payload.prompt,
         session: {
           id: conversationId,
@@ -184,14 +227,19 @@ export async function handleClientEvent(event: ClientEvent) {
             });
             actualConversationId = updates.lettaConversationId;
             
-            // Delete the old invalid session from UI and runtime state
-            deleteSession(conversationId);
+            rekeyRuntimeSession(conversationId, actualConversationId, {
+              title: actualConversationId,
+              cwd: event.payload.cwd,
+              status: "running",
+            });
+            if (handle) {
+              runnerHandles.delete(conversationId);
+              runnerHandles.set(actualConversationId, handle);
+            }
+
+            // Delete the old invalid session from UI state
             emit({ type: "session.deleted", payload: { sessionId: conversationId } });
-            
-            // Create new runtime session for the actual conversation
-            createRuntimeSession(actualConversationId);
-            updateSession(actualConversationId, { status: "running" });
-            
+
             // Notify UI about the new session
             emit({
               type: "session.status",
@@ -226,6 +274,7 @@ export async function handleClientEvent(event: ClientEvent) {
   if (event.type === "session.stop") {
     const conversationId = event.payload.sessionId;
     debug("session.stop: stopping session", { conversationId });
+    notifyCodeIslandStop(conversationId, { reason: "user" });
     const handle = runnerHandles.get(conversationId);
     if (handle) {
       debug("session.stop: aborting handle");
@@ -244,12 +293,14 @@ export async function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "session.delete") {
     const conversationId = event.payload.sessionId;
+    notifyCodeIslandStop(conversationId, { reason: "user" });
     const handle = runnerHandles.get(conversationId);
     if (handle) {
       handle.abort();
       runnerHandles.delete(conversationId);
     }
     deleteSession(conversationId);
+    clearCodeIslandSession(conversationId);
     
     // Note: Letta client may not have a delete method for conversations
     // The conversation will remain in Letta but be removed from our UI
@@ -271,8 +322,10 @@ export async function handleClientEvent(event: ClientEvent) {
 }
 
 export function cleanupAllSessions(): void {
-  for (const [, handle] of runnerHandles) {
+  for (const [conversationId, handle] of runnerHandles) {
+    notifyCodeIslandStop(conversationId, { reason: "user" });
     handle.abort();
+    clearCodeIslandSession(conversationId);
   }
   runnerHandles.clear();
 }

@@ -46,6 +46,45 @@ function createSession(id: string): SessionView {
   return { id, title: "", status: "idle", messages: [], permissionRequests: [], hydrated: false };
 }
 
+function messagesMatch(left: StreamMessage, right: StreamMessage): boolean {
+  if (left.type !== right.type) return false;
+
+  if (left.type === "user_prompt" && right.type === "user_prompt") {
+    return left.prompt === right.prompt;
+  }
+
+  if ("uuid" in left && "uuid" in right) {
+    return left.uuid === right.uuid;
+  }
+
+  return false;
+}
+
+function mergeHistoryMessages(
+  historyMessages: StreamMessage[],
+  existingMessages: StreamMessage[],
+): StreamMessage[] {
+  const merged = [...historyMessages];
+  let searchFromIndex = 0;
+
+  for (const existingMessage of existingMessages) {
+    const matchIndex = merged.findIndex(
+      (historyMessage, index) =>
+        index >= searchFromIndex && messagesMatch(historyMessage, existingMessage),
+    );
+
+    if (matchIndex >= 0) {
+      searchFromIndex = matchIndex + 1;
+      continue;
+    }
+
+    merged.push(existingMessage);
+    searchFromIndex = merged.length;
+  }
+
+  return merged;
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   sessions: {},
   activeSessionId: null,
@@ -140,8 +179,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const { sessionId, messages: historyMessages, status } = event.payload;
         set((state) => {
           const existing = state.sessions[sessionId] ?? createSession(sessionId);
-          // Merge: history messages first, then any existing messages (like user_prompt added during init)
-          const mergedMessages = [...historyMessages, ...existing.messages];
+          const mergedMessages = mergeHistoryMessages(historyMessages, existing.messages);
           return {
             sessions: {
               ...state.sessions,
@@ -286,7 +324,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       case "runner.error": {
-        set({ globalError: event.payload.message });
+        set((state) => ({
+          globalError: event.payload.message,
+          pendingStart: false,
+          showStartModal: state.pendingStart ? true : state.showStartModal,
+        }));
         break;
       }
     }

@@ -9,5 +9,8 @@
         "types": [
             "../../types"
         ]
-    }
+    },
+    "exclude": [
+        "**/*.test.ts"
+    ]
 }

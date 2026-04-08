@@ -5,8 +5,22 @@ import {
   type SDKMessage,
   type CanUseToolResponse,
 } from "@letta-ai/letta-code-sdk";
-import type { ServerEvent } from "../types.js";
+import type { ServerEvent, SessionStatus } from "../types.js";
 import type { PendingPermission } from "./runtime-state.js";
+import { getAppConfigState, getCompatibleLettaServerUrl } from "./config.js";
+import {
+  notifyCodeIslandAssistantMessage,
+  notifyCodeIslandSessionStart,
+  notifyCodeIslandStop,
+  notifyCodeIslandToolResult,
+  notifyCodeIslandToolRunning,
+  notifyCodeIslandUserPrompt,
+} from "./codeisland.js";
+import {
+  ensureCompatibleProvider,
+  getCompatibleServerApiKey,
+  resolveLettaCliPath,
+} from "./provider-bootstrap.js";
 
 // Simplified session type for runner
 export type RunnerSession = {
@@ -48,14 +62,19 @@ const debug = (msg: string, data?: Record<string, unknown>) => {
   log(msg, data);
 };
 
-// Store active Letta sessions for abort handling
-let activeLettaSession: LettaSession | null = null;
-
 // Store agentId for reuse across conversations
 let cachedAgentId: string | null = null;
 
+function applyRuntimeServerConfig(serverBaseUrl: string, apiKey: string): void {
+  process.env.LETTA_BASE_URL = serverBaseUrl;
+  process.env.LETTA_API_KEY = apiKey;
+  process.env.LETTA_CLI_PATH = resolveLettaCliPath();
+}
+
 export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
   const { prompt, session, resumeConversationId, onEvent, onSessionUpdate } = options;
+  let activeLettaSession: LettaSession | null = null;
+  let terminalStatus: SessionStatus | null = null;
   
   debug("runLetta called", {
     prompt: prompt.slice(0, 100) + (prompt.length > 100 ? "..." : ""),
@@ -79,6 +98,17 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
     onEvent({
       type: "permission.request",
       payload: { sessionId: currentSessionId, toolUseId, toolName, input }
+    });
+  };
+
+  const sendSessionStatus = (
+    status: SessionStatus,
+    extra: { error?: string } = {},
+  ) => {
+    terminalStatus = status;
+    onEvent({
+      type: "session.status",
+      payload: { sessionId: currentSessionId, status, title: currentSessionId, ...extra }
     });
   };
 
@@ -107,44 +137,77 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
       };
 
       // Session options
+      const appConfigState = getAppConfigState();
+      const connectionType = appConfigState.config.connectionType;
+      let effectiveModel = appConfigState.config.model;
+      let serverBaseUrl = appConfigState.config.LETTA_BASE_URL;
+      let serverApiKey = appConfigState.config.LETTA_API_KEY;
+
+      if (connectionType !== "letta-server") {
+        const compatibleProvider = await ensureCompatibleProvider(appConfigState.config);
+        serverBaseUrl = compatibleProvider.serverBaseUrl;
+        serverApiKey = getCompatibleServerApiKey();
+        effectiveModel = compatibleProvider.modelHandle;
+        log("compatible provider ready", {
+          connectionType,
+          providerName: compatibleProvider.providerName,
+          providerType: compatibleProvider.providerType,
+          modelHandle: compatibleProvider.modelHandle,
+          serverBaseUrl: compatibleProvider.serverBaseUrl,
+        });
+      }
+
+      applyRuntimeServerConfig(
+        serverBaseUrl ?? getCompatibleLettaServerUrl(),
+        serverApiKey?.trim() || (serverBaseUrl?.includes("localhost") ? "local-dev-key" : getCompatibleServerApiKey()),
+      );
+
       const sessionOptions = {
         cwd: session.cwd ?? DEFAULT_CWD,
         permissionMode: "bypassPermissions" as const,
         canUseTool,
+        model: effectiveModel,
       };
 
       // Create or resume session
       let lettaSession: LettaSession;
 
-      // Validate that resumeConversationId looks like a valid Letta ID
-      // Valid IDs are: agent-xxx, conv-xxx, conversation-xxx, or UUIDs
-      const isValidLettaId = (id: string | undefined): boolean => {
+      const isConversationId = (id: string | undefined): boolean => {
         if (!id) return false;
-        // Check for known prefixes or UUID format
-        return /^(agent-|conv-|conversation-|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/.test(id);
+        return /^(conv-|conversation-|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/.test(id);
       };
 
-      if (resumeConversationId && isValidLettaId(resumeConversationId)) {
-        // Resume specific conversation
+      const isAgentId = (id: string | undefined): boolean => {
+        if (!id) return false;
+        return /^agent-/.test(id);
+      };
+
+      if (resumeConversationId && isConversationId(resumeConversationId)) {
         debug("creating session: resumeSession with conversationId", { resumeConversationId });
         lettaSession = resumeSession(resumeConversationId, sessionOptions);
-      } else if (resumeConversationId && !isValidLettaId(resumeConversationId)) {
+      } else if (resumeConversationId && isAgentId(resumeConversationId)) {
+        // The current SDK maps resumeSession(agentId) to a CLI --default flag path,
+        // which this CLI build does not support. Use a new conversation on the
+        // existing agent instead.
+        debug("creating session: createSession with agentId", { agentId: resumeConversationId });
+        lettaSession = createSession(resumeConversationId, sessionOptions);
+      } else if (resumeConversationId) {
         // Invalid ID provided - log warning and fall back to cachedAgentId
         log("WARNING: invalid resumeConversationId, falling back", { 
           invalidId: resumeConversationId, 
           fallbackTo: cachedAgentId ? "cachedAgentId" : "createSession" 
         });
         if (cachedAgentId) {
-          debug("creating session: resumeSession with cachedAgentId (fallback)", { cachedAgentId });
-          lettaSession = resumeSession(cachedAgentId, sessionOptions);
+          debug("creating session: createSession with cachedAgentId (fallback)", { cachedAgentId });
+          lettaSession = createSession(cachedAgentId, sessionOptions);
         } else {
           debug("creating session: createSession (new agent, fallback)");
           lettaSession = createSession(undefined, sessionOptions);
         }
       } else if (cachedAgentId) {
         // Create new conversation on existing agent
-        debug("creating session: resumeSession with cachedAgentId", { cachedAgentId });
-        lettaSession = resumeSession(cachedAgentId, sessionOptions);
+        debug("creating session: createSession with cachedAgentId", { cachedAgentId });
+        lettaSession = createSession(cachedAgentId, sessionOptions);
       } else {
         // First time - create new agent and session
         debug("creating session: createSession (new agent)");
@@ -168,6 +231,8 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
         currentSessionId = lettaSession.conversationId;
         debug("session initialized", { conversationId: lettaSession.conversationId, agentId: lettaSession.agentId });
         onSessionUpdate?.({ lettaConversationId: lettaSession.conversationId });
+        notifyCodeIslandSessionStart(currentSessionId, session.cwd);
+        notifyCodeIslandUserPrompt(currentSessionId, prompt);
       } else {
         log("WARNING: no conversationId available after send()");
       }
@@ -188,25 +253,33 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
         // Send message directly to frontend (no transform needed)
         sendMessage(message);
 
+        if (message.type === "tool_call") {
+          notifyCodeIslandToolRunning(currentSessionId, message.toolCallId, message.toolName);
+        }
+
+        if (message.type === "tool_result") {
+          notifyCodeIslandToolResult(currentSessionId, message.toolCallId, message.isError);
+        }
+
+        if (message.type === "assistant" && message.content.trim()) {
+          notifyCodeIslandAssistantMessage(currentSessionId, message.content);
+        }
+
         // Check for result to update session status
         if (message.type === "result") {
           const status = message.success ? "completed" : "error";
           debug("result received", { success: message.success, status });
-          onEvent({
-            type: "session.status",
-            payload: { sessionId: currentSessionId, status, title: currentSessionId }
-          });
+          notifyCodeIslandStop(currentSessionId, message.success ? undefined : { error: message.error });
+          sendSessionStatus(status, message.success ? undefined : { error: message.error });
         }
       }
       debug("stream ended", { totalMessages: messageCount });
 
       // Query completed normally
-      if (session.status === "running") {
+      if (terminalStatus === null) {
         debug("query completed normally");
-        onEvent({
-          type: "session.status",
-          payload: { sessionId: currentSessionId, status: "completed", title: currentSessionId }
-        });
+        notifyCodeIslandStop(currentSessionId);
+        sendSessionStatus("completed");
       }
     } catch (error) {
       if ((error as Error).name === "AbortError") {
@@ -219,10 +292,15 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
         name: (error as Error).name,
         stack: (error as Error).stack 
       });
-      onEvent({
-        type: "session.status",
-        payload: { sessionId: currentSessionId, status: "error", title: currentSessionId, error: String(error) }
-      });
+      notifyCodeIslandStop(currentSessionId, { error: String(error) });
+      if (currentSessionId === "pending") {
+        onEvent({
+          type: "runner.error",
+          payload: { message: String(error) }
+        });
+        return;
+      }
+      sendSessionStatus("error", { error: String(error) });
     } finally {
       debug("runLetta finally block, clearing activeLettaSession");
       activeLettaSession = null;

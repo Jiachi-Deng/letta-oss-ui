@@ -3,6 +3,7 @@ import fs from "fs"
 import os from "os"
 import { BrowserWindow } from "electron";
 import { ipcWebContentsSend } from "./util.js";
+import type { CodeIslandRuntimeStatus } from "./libs/bundled-codeisland.js";
 
 const POLLING_INTERVAL = 500;
 
@@ -34,7 +35,7 @@ export function stopPolling(): void {
     }
 }
 
-export function getStaticData() {
+export function getStaticData(codeIsland?: CodeIslandRuntimeStatus) {
     const totalStorage = getStorageData().total;
     const cpuModel = os.cpus()[0].model;
     const totalMemoryGB = Math.floor(osUtils.totalmem() / 1024);
@@ -42,7 +43,8 @@ export function getStaticData() {
     return {
         totalStorage,
         cpuModel,
-        totalMemoryGB
+        totalMemoryGB,
+        codeIsland,
     }
 }
 
@@ -66,5 +68,4 @@ function getStorageData() {
         usage: 1 - free / total
     }
 }
-
 

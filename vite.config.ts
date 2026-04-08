@@ -17,5 +17,10 @@ export default defineConfig(({ mode }) => {
 			port, // MUST BE LOWERCASE
 			strictPort: true,
 		},
+		test: {
+			globals: true,
+			setupFiles: ['./src/test/setup.ts'],
+			environment: 'node',
+		},
 	};
 });

@@ -6,6 +6,7 @@ import { useAppStore } from "./store/useAppStore";
 import type { ServerEvent } from "./types";
 import { Sidebar } from "./components/Sidebar";
 import { StartSessionModal } from "./components/StartSessionModal";
+import { OnboardingModal } from "./components/OnboardingModal";
 import { PromptInput, usePromptActions } from "./components/PromptInput";
 import { MessageCard } from "./components/EventCard";
 import MDContent from "./render/markdown";
@@ -21,6 +22,10 @@ function App() {
   const [showPartialMessage, setShowPartialMessage] = useState(false);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [codeIslandWarning, setCodeIslandWarning] = useState<string | null>(null);
+  const [connectionWarning, setConnectionWarning] = useState<string | null>(null);
+  const [configState, setConfigState] = useState<Awaited<ReturnType<Window["electron"]["getAppConfig"]>> | null>(null);
   const prevMessagesLengthRef = useRef(0);
   const scrollHeightBeforeLoadRef = useRef(0);
   const shouldRestoreScrollRef = useRef(false);
@@ -97,10 +102,73 @@ function App() {
     totalMessages,
   } = useMessageWindow(messages, permissionRequests, activeSessionId);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    window.electron.getAppConfig()
+      .then((nextConfigState) => {
+        if (!cancelled) {
+          setConfigState(nextConfigState);
+          setConnectionWarning(
+            nextConfigState.config.connectionType === "letta-server"
+              ? null
+              : `${nextConfigState.config.connectionType === "anthropic-compatible" ? "Anthropic" : "OpenAI"}-compatible mode is active. Letta will register a BYOK provider on your local Letta server before starting the session.`,
+          );
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load app config:", error);
+        if (!cancelled) {
+          setGlobalError("Could not load Letta configuration.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setGlobalError]);
+
   // 启动时检查 API 配置
   useEffect(() => {
-    if (connected) sendEvent({ type: "session.list" });
-  }, [connected, sendEvent]);
+    if (connected && configState && !configState.requiresOnboarding) {
+      sendEvent({ type: "session.list" });
+    }
+  }, [connected, configState, sendEvent]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    window.electron.getStaticData()
+      .then((staticData) => {
+        if (cancelled) return;
+
+        if (staticData.codeIsland?.platformSupported && !staticData.codeIsland.available) {
+          setCodeIslandWarning("Bundled CodeIsland.app is missing. Letta will keep working, but the notch companion is unavailable.");
+          return;
+        }
+
+        setCodeIslandWarning(null);
+      })
+      .catch((error) => {
+        console.error("Failed to load static app data:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleConfigSaved = useCallback((nextConfigState: Awaited<ReturnType<Window["electron"]["getAppConfig"]>>) => {
+    setConfigState(nextConfigState);
+    setConnectionWarning(
+      nextConfigState.config.connectionType === "letta-server"
+        ? null
+        : `${nextConfigState.config.connectionType === "anthropic-compatible" ? "Anthropic" : "OpenAI"}-compatible mode is active. Letta will register a BYOK provider on your local Letta server before starting the session.`,
+    );
+    if (!nextConfigState.requiresOnboarding) {
+      sendEvent({ type: "session.list" });
+    }
+  }, [sendEvent]);
 
   useEffect(() => {
     if (!activeSessionId || !connected) return;
@@ -203,6 +271,10 @@ function App() {
     sendEvent({ type: "session.delete", payload: { sessionId } });
   }, [sendEvent]);
 
+  const handleOpenSettings = useCallback(() => {
+    setShowSettingsModal(true);
+  }, []);
+
   const handlePermissionResult = useCallback((toolUseId: string, result: CanUseToolResponse) => {
     if (!activeSessionId) return;
     sendEvent({ type: "permission.response", payload: { sessionId: activeSessionId, toolUseId, result } });
@@ -221,6 +293,7 @@ function App() {
         connected={connected}
         onNewSession={handleNewSession}
         onDeleteSession={handleDeleteSession}
+        onOpenSettings={handleOpenSettings}
       />
 
       <main className="flex flex-1 flex-col ml-[280px] bg-surface-cream">
@@ -228,8 +301,40 @@ function App() {
           className="flex items-center justify-center h-12 border-b border-ink-900/10 bg-surface-cream select-none"
           style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
         >
-          <span className="text-sm font-medium text-ink-700">{activeSession?.title || "Letta Cowork"}</span>
+          <span className="text-sm font-medium text-ink-700">{activeSession?.title || "Letta"}</span>
         </div>
+
+        {codeIslandWarning && (
+          <div className="border-b border-warning/20 bg-warning-light px-6 py-3">
+            <div className="mx-auto flex max-w-3xl items-center gap-3">
+              <span className="text-sm font-medium text-warning">{codeIslandWarning}</span>
+              <button
+                className="ml-auto text-warning transition-colors hover:text-warning/80"
+                onClick={() => setCodeIslandWarning(null)}
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {connectionWarning && (
+          <div className="border-b border-info/20 bg-info-light px-6 py-3">
+            <div className="mx-auto flex max-w-3xl items-center gap-3">
+              <span className="text-sm font-medium text-info">{connectionWarning}</span>
+              <button
+                className="ml-auto text-info transition-colors hover:text-info/80"
+                onClick={() => setConnectionWarning(null)}
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
 
         <div
           ref={scrollContainerRef}
@@ -264,7 +369,7 @@ function App() {
             {visibleMessages.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div className="text-lg font-medium text-ink-700">No messages yet</div>
-                <p className="mt-2 text-sm text-muted">Start a conversation with Letta Cowork</p>
+                <p className="mt-2 text-sm text-muted">Start a conversation with Letta</p>
               </div>
             ) : (
               visibleMessages.map((item, idx) => (
@@ -301,7 +406,11 @@ function App() {
           </div>
         </div>
 
-        <PromptInput sendEvent={sendEvent} onSendMessage={handleSendMessage} disabled={visibleMessages.length === 0} />
+        <PromptInput
+          sendEvent={sendEvent}
+          onSendMessage={handleSendMessage}
+          disabled={!activeSessionId}
+        />
 
         {hasNewMessages && !shouldAutoScroll && (
           <button
@@ -337,6 +446,22 @@ function App() {
             </button>
           </div>
         </div>
+      )}
+
+      {configState?.requiresOnboarding && (
+        <OnboardingModal
+          configState={configState}
+          onSaved={handleConfigSaved}
+        />
+      )}
+
+      {configState && !configState.requiresOnboarding && showSettingsModal && (
+        <OnboardingModal
+          configState={configState}
+          mode="settings"
+          onSaved={handleConfigSaved}
+          onClose={() => setShowSettingsModal(false)}
+        />
       )}
     </div>
   );

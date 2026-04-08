@@ -1,20 +1,30 @@
 import { app, BrowserWindow, ipcMain, dialog, globalShortcut, Menu } from "electron"
 import { execSync } from "child_process";
-import { config as dotenvConfig } from "dotenv";
-import { join } from "path";
 import { ipcMainHandle, isDev, DEV_PORT } from "./util.js";
+import { getPreloadPath, getUIPath, getIconPath } from "./pathResolver.js";
+import { getStaticData, pollResources, stopPolling } from "./test.js";
+import { handleClientEvent, cleanupAllSessions } from "./ipc-handlers.js";
+import type { ClientEvent } from "./types.js";
+import { getAppConfigState, initializeAppConfig, saveAppConfig } from "./libs/config.js";
+import {
+    ensureCodeIslandStarted,
+    getCodeIslandRuntimeStatus,
+    startCodeIslandMonitor,
+    type CodeIslandMonitorHandle,
+} from "./libs/bundled-codeisland.js";
 
-// Load .env file from project root
-dotenvConfig({ path: join(process.cwd(), ".env") });
+const PRODUCT_NAME = "Letta";
+const APP_ID = "com.jachi.letta";
 
-// Default to Letta Cloud if no base URL set
-if (!process.env.LETTA_BASE_URL) {
-  process.env.LETTA_BASE_URL = "https://api.letta.com";
-}
+configureRuntimeIdentity();
+initializeAppConfig();
 
-// Set dummy API key for localhost (local server doesn't check it)
-if (!process.env.LETTA_API_KEY && process.env.LETTA_BASE_URL?.includes("localhost")) {
-  process.env.LETTA_API_KEY = "local-dev-key";
+function configureRuntimeIdentity(): void {
+    app.setName(PRODUCT_NAME);
+
+    if (process.platform === "win32") {
+        app.setAppUserModelId(APP_ID);
+    }
 }
 
 // Find letta CLI
@@ -30,13 +40,10 @@ try {
 } catch (e) {
   console.warn("Could not find letta CLI:", e);
 }
-import { getPreloadPath, getUIPath, getIconPath } from "./pathResolver.js";
-import { getStaticData, pollResources, stopPolling } from "./test.js";
-import { handleClientEvent, cleanupAllSessions } from "./ipc-handlers.js";
-import type { ClientEvent } from "./types.js";
 
 let cleanupComplete = false;
 let mainWindow: BrowserWindow | null = null;
+let codeIslandMonitor: CodeIslandMonitorHandle | null = null;
 
 function killViteDevServer(): void {
     if (!isDev()) return;
@@ -57,6 +64,8 @@ function cleanup(): void {
 
     globalShortcut.unregisterAll();
     stopPolling();
+    codeIslandMonitor?.stop();
+    codeIslandMonitor = null;
     cleanupAllSessions();
     killViteDevServer();
 }
@@ -80,6 +89,16 @@ app.on("ready", () => {
     process.on("SIGTERM", handleSignal);
     process.on("SIGINT", handleSignal);
     process.on("SIGHUP", handleSignal);
+
+    const codeIslandStartup = ensureCodeIslandStarted();
+    codeIslandMonitor = startCodeIslandMonitor();
+    if (codeIslandStartup.status === "launched" && codeIslandStartup.resolution) {
+        console.log(`[codeisland] Launched ${codeIslandStartup.resolution.source} app at ${codeIslandStartup.resolution.appPath}`);
+    } else if (codeIslandStartup.status === "already-running") {
+        console.log("[codeisland] Already running; skipping startup launch.");
+    } else if (codeIslandStartup.status === "missing") {
+        console.warn("[codeisland] CodeIsland.app was not found. Skipping startup launch.");
+    }
 
     // Create main window
     mainWindow = new BrowserWindow({
@@ -107,7 +126,15 @@ app.on("ready", () => {
     pollResources(mainWindow);
 
     ipcMainHandle("getStaticData", () => {
-        return getStaticData();
+        return getStaticData(getCodeIslandRuntimeStatus());
+    });
+
+    ipcMainHandle("get-app-config", () => {
+        return getAppConfigState();
+    });
+
+    ipcMainHandle("save-app-config", (_event, config) => {
+        return saveAppConfig(config);
     });
 
     // Handle client events
