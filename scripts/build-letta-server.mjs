@@ -37,7 +37,7 @@ const stageVenvPath = path.join(stageRoot, "venv");
 const stagePythonPath = path.join(stageVenvPath, "bin", "python3");
 const stagePythonBaseRoot = path.join(stageRoot, "python-base");
 const stageNltkDataRoot = path.join(stageRoot, "nltk_data");
-const LAYOUT_VERSION = 9;
+const LAYOUT_VERSION = 10;
 const DIST_INFO_METADATA_FILES = new Set(["INSTALLER", "RECORD", "REQUESTED", "direct_url.json"]);
 const TRANSIENT_DIR_NAMES = new Set(["__pycache__", ".pytest_cache", "tests", "test", "testing"]);
 const TRANSIENT_ROOT_PREFIXES = ["server-home", "logs"];
@@ -475,6 +475,27 @@ function stageFromLocalVenv(sourceSitePackages) {
   resetSymlink(
     path.join(stageFrameworkVersionRoot, "Headers"),
     path.join("include", `python${getPythonAbiTag(buildPython.version)}`),
+  );
+  resetSymlink(path.join(stageFrameworkVersionRoot, "lib", `libpython${getPythonAbiTag(buildPython.version)}.dylib`), "../Python");
+  resetSymlink(
+    path.join(
+      stageFrameworkVersionRoot,
+      "lib",
+      `python${getPythonAbiTag(buildPython.version)}`,
+      `config-${getPythonAbiTag(buildPython.version)}-darwin`,
+      `libpython${getPythonAbiTag(buildPython.version)}.dylib`,
+    ),
+    "../../../Python",
+  );
+  resetSymlink(
+    path.join(
+      stageFrameworkVersionRoot,
+      "lib",
+      `python${getPythonAbiTag(buildPython.version)}`,
+      `config-${getPythonAbiTag(buildPython.version)}-darwin`,
+      `libpython${getPythonAbiTag(buildPython.version)}.a`,
+    ),
+    "../../../Python",
   );
 
   writeFileSync(
