@@ -326,6 +326,26 @@
 
 这是**打包后必须跑**的脚本。
 
+### 5.6 做“同机首装复测”
+
+```bash
+./scripts/retest-first-install.sh
+```
+
+它会做的事情包括：
+
+- 停掉正在运行的 `Letta` / `CodeIsland` / `letta.js`
+- 删除 `/Applications/Letta.app`
+- 删除用户态配置、缓存、Application Support 残留
+- 把最新的 `.dmg` / `.zip` 从
+  `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/dist`
+  复制到
+  `/Users/jachi/Desktop/letta-workspace/releases`
+- 打印下一步应该手工测试哪个安装包
+
+它不会自动打开 app，也不会替你走安装流程。  
+它的作用是把当前机器尽量清回“接近首次安装”的状态，并把待测安装包统一放到 `releases/`。
+
 ---
 
 ## 6. 如果要新增功能，应该从哪里开始？
@@ -480,15 +500,183 @@ cd /Users/jachi/Desktop/letta-workspace
 ./scripts/verify-release.sh
 ```
 
-打包完成后主要看：
+打包完成后，`electron-builder` 的原始输出目录是：
+
+- `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/dist`
+
+这里会包含：
+
+- `dist/mac-arm64/Letta.app`
+- `dist/Letta-*.dmg`
+- `dist/Letta-*-mac.zip`
+
+但日常验收和对外投放时，建议统一使用：
 
 - `/Users/jachi/Desktop/letta-workspace/releases`
+
+推荐做法：
+
+```bash
+cd /Users/jachi/Desktop/letta-workspace
+./scripts/retest-first-install.sh
+```
+
+这个脚本会把当前最新的 `.dmg` / `.zip` 复制到 `releases/`，并把机器清到“接近首次安装”的状态。
 
 你也可以看 app repo 里的中间产物：
 
 - `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/dist`
 
-但最终发布物还是以 `releases/` 为准。
+但要严格区分：
+
+- `dist/mac-arm64/Letta.app` 只用于 **Bundle Smoke**
+- `.dmg` / `.zip` 只用于 **Installer First Run**
+- 最终发布和手工验收统一以 `releases/` 为准
+
+### 9.1 两种测试必须严格分开
+
+#### A. Bundle Smoke
+
+只允许使用：
+
+- `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/dist/mac-arm64/Letta.app`
+
+目标：
+
+- 验证 app bundle 本体能不能跑
+- 验证 bundled LettaServer / CodeIsland / SDK / runtime 是否完整
+
+这一步不能代表普通用户安装链路没问题。
+
+#### B. Installer First Run
+
+只允许使用：
+
+- `/Users/jachi/Desktop/letta-workspace/releases/Letta-*.dmg`
+- `/Users/jachi/Desktop/letta-workspace/releases/Letta-*-mac.zip`
+
+目标：
+
+- 验证用户下载、安装、首次启动、首次配置、首次对话是否完整成功
+
+这一步才是“普通用户首装模拟”。
+
+### 9.2 安装包首装验收清单
+
+#### 清理前置步骤
+
+先执行：
+
+```bash
+cd /Users/jachi/Desktop/letta-workspace
+./scripts/retest-first-install.sh
+```
+
+然后确认：
+
+- 不要打开 `dist/mac-arm64/Letta.app`
+- `/Applications/Letta.app` 已删除
+- `Letta` / `CodeIsland` 相关进程已停止
+- 待测安装包已经在 `releases/`
+
+#### 清单 A：Bundle Smoke
+
+输入物：
+
+- `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/dist/mac-arm64/Letta.app`
+
+通过标准：
+
+- 首次启动能看到配置页
+- `API key / Base URL / Model` 能保存
+- 第一条消息能收到回复
+- 连续 3 条消息都能正常回复
+- `CodeIsland` 会自动拉起
+- 退出再打开后仍能继续对话
+
+禁止事项：
+
+- 不看 `.dmg`
+- 不看 `.zip`
+- 不把它当成“普通用户安装测试”
+
+#### 清单 B：DMG 首装
+
+输入物：
+
+- `/Users/jachi/Desktop/letta-workspace/releases/Letta-*.dmg`
+
+步骤：
+
+1. 运行 `./scripts/retest-first-install.sh`
+2. 打开 `releases/` 里的 `.dmg`
+3. 把 `Letta.app` 拖到 `/Applications`
+4. 弹出 DMG
+5. 从 Finder 打开 `/Applications/Letta.app`
+
+通过标准：
+
+- 首启能打开主窗口
+- 配置可以保存
+- 第一条消息就能收到回复
+- 连续 3 条消息都正常
+- `CodeIsland` 自动拉起
+- 退出重开后仍能继续对话
+
+禁止事项：
+
+- 不允许直接从挂载的 DMG 里运行
+- 不允许中途启动 `dist/mac-arm64/Letta.app`
+
+#### 清单 C：ZIP 首装
+
+输入物：
+
+- `/Users/jachi/Desktop/letta-workspace/releases/Letta-*-mac.zip`
+
+步骤：
+
+1. 运行 `./scripts/retest-first-install.sh`
+2. 解压 `releases/` 里的 `.zip`
+3. 把解压出的 `Letta.app` 移到 `/Applications`
+4. 从 Finder 打开 `/Applications/Letta.app`
+
+通过标准：
+
+- 首启能打开主窗口
+- 配置可以保存
+- 第一条消息就能收到回复
+- 连续 3 条消息都正常
+- `CodeIsland` 自动拉起
+- 退出重开后仍能继续对话
+
+说明：
+
+- 如果你额外测试“直接从解压目录启动”，那只是补充测试，不算标准安装路径
+
+#### 清单 D：新 macOS 用户 / 新虚拟机里的最严格首装模拟
+
+这是最严格、最接近真实用户的方式，比“同机清理重测”更可信。
+
+推荐做法：
+
+1. 新建一个全新的 macOS 用户，或者启一个全新的 macOS 虚拟机
+2. 不安装任何 Letta 历史版本
+3. 不拷贝旧的 `~/Library/Application Support/Letta`、`~/.letta` 等目录
+4. 只把 `releases/` 里的 `.dmg` 或 `.zip` 带进去
+5. 用 Finder 正常安装
+6. 首次打开时填写 `API key / Base URL / Model`
+7. 完成第一条对话、连续多轮对话、重启后继续对话验证
+
+最严格通过标准：
+
+- 不依赖旧用户目录
+- 不依赖工作区里的 `dist` bundle
+- 不依赖本机此前跑过的 Letta 配置
+- 不依赖外部单独安装的 `CodeIsland.app`
+- 不依赖手工补环境后才能对话
+
+如果你要对外发包，最终应以清单 D 的结果为最高标准。
 
 ---
 
