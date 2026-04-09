@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sendMock = vi.hoisted(() => vi.fn());
 const runLettaMock = vi.hoisted(() => vi.fn());
-const createRuntimeSessionMock = vi.hoisted(() => vi.fn());
-const updateSessionMock = vi.hoisted(() => vi.fn());
-const getSessionMock = vi.hoisted(() => vi.fn());
-const deleteSessionMock = vi.hoisted(() => vi.fn());
-const clearCodeIslandSessionMock = vi.hoisted(() => vi.fn());
-const notifyCodeIslandStopMock = vi.hoisted(() => vi.fn());
+const createSessionProjectionMock = vi.hoisted(() => vi.fn());
+const updateSessionProjectionMock = vi.hoisted(() => vi.fn());
+const getSessionProjectionMock = vi.hoisted(() => vi.fn());
+const deleteSessionProjectionMock = vi.hoisted(() => vi.fn());
+const clearCodeIslandObservationMock = vi.hoisted(() => vi.fn());
+const finishCodeIslandObservationMock = vi.hoisted(() => vi.fn());
 
 vi.mock("electron", () => ({
 	BrowserWindow: {
@@ -26,22 +26,22 @@ vi.mock("./libs/runner.js", () => ({
 }));
 
 vi.mock("./libs/runtime-state.js", () => ({
-	createRuntimeSession: createRuntimeSessionMock,
-	updateSession: updateSessionMock,
-	getSession: getSessionMock,
-	deleteSession: deleteSessionMock,
+	createSessionProjection: createSessionProjectionMock,
+	updateSessionProjection: updateSessionProjectionMock,
+	getSessionProjection: getSessionProjectionMock,
+	deleteSessionProjection: deleteSessionProjectionMock,
 }));
 
-vi.mock("./libs/codeisland.js", () => ({
-	clearCodeIslandSession: clearCodeIslandSessionMock,
-	notifyCodeIslandStop: notifyCodeIslandStopMock,
+vi.mock("./libs/codeisland-observer.js", () => ({
+	clearCodeIslandObservation: clearCodeIslandObservationMock,
+	finishCodeIslandObservation: finishCodeIslandObservationMock,
 }));
 
 describe("handleClientEvent", () => {
 	beforeEach(() => {
 		vi.resetModules();
 		vi.clearAllMocks();
-		getSessionMock.mockReturnValue(undefined);
+		getSessionProjectionMock.mockReturnValue(undefined);
 	});
 
 	it("broadcasts runner.error when session start fails", async () => {
@@ -59,7 +59,7 @@ describe("handleClientEvent", () => {
 		});
 
 		expect(runLettaMock).toHaveBeenCalledTimes(1);
-		expect(createRuntimeSessionMock).not.toHaveBeenCalled();
+		expect(createSessionProjectionMock).not.toHaveBeenCalled();
 		expect(sendMock).toHaveBeenCalledTimes(1);
 		expect(sendMock).toHaveBeenCalledWith(
 			"server-event",

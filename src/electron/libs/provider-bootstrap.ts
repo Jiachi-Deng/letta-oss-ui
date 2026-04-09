@@ -19,6 +19,29 @@ type CompatibleProviderConfig = {
   modelName: string;
 };
 
+export type RuntimeBootstrapAction =
+  | {
+      kind: "none";
+    }
+  | {
+      kind: "compatible-provider";
+      providerType: SupportedProviderType;
+      providerName: string;
+      providerToken: SupportedProviderType;
+      providerBaseUrl: string;
+      serverBaseUrl: string;
+      modelHandle: string;
+      modelName: string;
+    };
+
+export type RuntimeConnectionInfo = {
+  baseUrl: string;
+  apiKey?: string;
+  modelHandle?: string;
+  cliPath: string;
+  bootstrapAction: RuntimeBootstrapAction;
+};
+
 const LOCAL_SERVER_API_KEY = "local-dev-key";
 const require = createRequire(import.meta.url);
 const compatibleProviderCache = new Map<string, Promise<CompatibleProviderConfig>>();
@@ -252,4 +275,57 @@ export function getCompatibleServerApiKey(): string {
     normalizeString(process.env.LETTA_LOCAL_SERVER_API_KEY) ??
     LOCAL_SERVER_API_KEY
   );
+}
+
+function applyRuntimeConnectionEnv(connection: RuntimeConnectionInfo): void {
+  process.env.LETTA_BASE_URL = connection.baseUrl;
+  process.env.LETTA_CLI_PATH = connection.cliPath;
+
+  if (connection.apiKey) {
+    process.env.LETTA_API_KEY = connection.apiKey;
+  } else {
+    delete process.env.LETTA_API_KEY;
+  }
+}
+
+export async function prepareRuntimeConnection(
+  config: LettaAppConfig,
+): Promise<RuntimeConnectionInfo> {
+  const cliPath = resolveLettaCliPath();
+
+  if (config.connectionType === "letta-server") {
+    const baseUrl = normalizeUrl(config.LETTA_BASE_URL);
+    const apiKey = normalizeString(config.LETTA_API_KEY);
+    const connection: RuntimeConnectionInfo = {
+      baseUrl,
+      apiKey: apiKey ?? (baseUrl.includes("localhost") ? LOCAL_SERVER_API_KEY : undefined),
+      modelHandle: config.model,
+      cliPath,
+      bootstrapAction: { kind: "none" },
+    };
+
+    applyRuntimeConnectionEnv(connection);
+    return connection;
+  }
+
+  const compatibleProvider = await ensureCompatibleProvider(config);
+  const connection: RuntimeConnectionInfo = {
+    baseUrl: compatibleProvider.serverBaseUrl,
+    apiKey: getCompatibleServerApiKey(),
+    modelHandle: compatibleProvider.modelHandle,
+    cliPath,
+    bootstrapAction: {
+      kind: "compatible-provider",
+      providerType: compatibleProvider.providerType,
+      providerName: compatibleProvider.providerName,
+      providerToken: compatibleProvider.providerToken,
+      providerBaseUrl: normalizeUrl(config.LETTA_BASE_URL),
+      serverBaseUrl: compatibleProvider.serverBaseUrl,
+      modelHandle: compatibleProvider.modelHandle,
+      modelName: compatibleProvider.modelName,
+    },
+  };
+
+  applyRuntimeConnectionEnv(connection);
+  return connection;
 }

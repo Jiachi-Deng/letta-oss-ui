@@ -113,4 +113,28 @@ describe("provider bootstrap", () => {
 			}),
 		);
 	});
+
+	it("resolves a direct server runtime connection without compatible bootstrap", async () => {
+		process.env.LETTA_CLI_PATH = "/tmp/letta.js";
+		existsSyncMock.mockImplementation((candidate) => candidate === "/tmp/letta.js");
+
+		const { prepareRuntimeConnection } = await import("./provider-bootstrap.ts");
+
+		const result = await prepareRuntimeConnection({
+			connectionType: "letta-server",
+			LETTA_BASE_URL: "http://localhost:8283",
+			model: "gpt-4o",
+		});
+
+		expect(result).toMatchObject({
+			baseUrl: "http://localhost:8283",
+			apiKey: "local-dev-key",
+			modelHandle: "gpt-4o",
+			bootstrapAction: { kind: "none" },
+		});
+		expect(spawnMock).not.toHaveBeenCalled();
+		expect(process.env.LETTA_BASE_URL).toBe("http://localhost:8283");
+		expect(process.env.LETTA_API_KEY).toBe("local-dev-key");
+		expect(process.env.LETTA_CLI_PATH).toBe("/tmp/letta.js");
+	});
 });

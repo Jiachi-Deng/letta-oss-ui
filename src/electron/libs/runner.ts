@@ -7,20 +7,26 @@ import {
 } from "@letta-ai/letta-code-sdk";
 import type { ServerEvent, SessionStatus } from "../types.js";
 import type { PendingPermission } from "./runtime-state.js";
-import { getAppConfigState, getCompatibleLettaServerUrl } from "./config.js";
 import {
-  notifyCodeIslandAssistantMessage,
-  notifyCodeIslandSessionStart,
-  notifyCodeIslandStop,
-  notifyCodeIslandToolResult,
-  notifyCodeIslandToolRunning,
-  notifyCodeIslandUserPrompt,
-} from "./codeisland.js";
+  normalizeMessageContent,
+  normalizeSDKMessageForApp,
+} from "../../shared/message-normalizer.js";
+import { getAppConfigState } from "./config.js";
 import {
-  ensureCompatibleProvider,
-  getCompatibleServerApiKey,
-  resolveLettaCliPath,
+  prepareRuntimeConnection,
 } from "./provider-bootstrap.js";
+import {
+  beginCodeIslandObservation,
+  finishCodeIslandObservation,
+  mirrorCodeIslandAssistantMessage,
+  mirrorCodeIslandToolResult,
+  mirrorCodeIslandToolRunning,
+} from "./codeisland-observer.js";
+import {
+  acquireReusableConversationSession,
+  beginReusableConversationTurn,
+  completeReusableConversationTurn,
+} from "./conversation-session-cache.js";
 
 // Simplified session type for runner
 export type RunnerSession = {
@@ -40,7 +46,7 @@ export type RunnerOptions = {
 };
 
 export type RunnerHandle = {
-  abort: () => void;
+  abort: () => Promise<void>;
 };
 
 const DEFAULT_CWD = process.cwd();
@@ -65,16 +71,14 @@ const debug = (msg: string, data?: Record<string, unknown>) => {
 // Store agentId for reuse across conversations
 let cachedAgentId: string | null = null;
 
-function applyRuntimeServerConfig(serverBaseUrl: string, apiKey: string): void {
-  process.env.LETTA_BASE_URL = serverBaseUrl;
-  process.env.LETTA_API_KEY = apiKey;
-  process.env.LETTA_CLI_PATH = resolveLettaCliPath();
-}
-
 export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
   const { prompt, session, resumeConversationId, onEvent, onSessionUpdate } = options;
   let activeLettaSession: LettaSession | null = null;
   let terminalStatus: SessionStatus | null = null;
+  let activeConversationId: string | null = null;
+  let keepReusableSession = false;
+  let turnLockHeld = false;
+  let reusableSessionSignature = "";
   
   debug("runLetta called", {
     prompt: prompt.slice(0, 100) + (prompt.length > 100 ? "..." : ""),
@@ -88,9 +92,10 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
   let currentSessionId = session.id;
 
   const sendMessage = (message: SDKMessage) => {
+    const normalizedMessage = normalizeSDKMessageForApp(message);
     onEvent({
       type: "stream.message",
-      payload: { sessionId: currentSessionId, message }
+      payload: { sessionId: currentSessionId, message: normalizedMessage }
     });
   };
 
@@ -138,35 +143,24 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
 
       // Session options
       const appConfigState = getAppConfigState();
-      const connectionType = appConfigState.config.connectionType;
-      let effectiveModel = appConfigState.config.model;
-      let serverBaseUrl = appConfigState.config.LETTA_BASE_URL;
-      let serverApiKey = appConfigState.config.LETTA_API_KEY;
-
-      if (connectionType !== "letta-server") {
-        const compatibleProvider = await ensureCompatibleProvider(appConfigState.config);
-        serverBaseUrl = compatibleProvider.serverBaseUrl;
-        serverApiKey = getCompatibleServerApiKey();
-        effectiveModel = compatibleProvider.modelHandle;
-        log("compatible provider ready", {
-          connectionType,
-          providerName: compatibleProvider.providerName,
-          providerType: compatibleProvider.providerType,
-          modelHandle: compatibleProvider.modelHandle,
-          serverBaseUrl: compatibleProvider.serverBaseUrl,
-        });
-      }
-
-      applyRuntimeServerConfig(
-        serverBaseUrl ?? getCompatibleLettaServerUrl(),
-        serverApiKey?.trim() || (serverBaseUrl?.includes("localhost") ? "local-dev-key" : getCompatibleServerApiKey()),
-      );
+      const runtimeConnection = await prepareRuntimeConnection(appConfigState.config);
+      reusableSessionSignature = JSON.stringify({
+        baseUrl: runtimeConnection.baseUrl,
+        modelHandle: runtimeConnection.modelHandle ?? "",
+        cwd: session.cwd ?? DEFAULT_CWD,
+      });
+      log("runtime connection ready", {
+        connectionType: appConfigState.config.connectionType,
+        baseUrl: runtimeConnection.baseUrl,
+        modelHandle: runtimeConnection.modelHandle,
+        bootstrapAction: runtimeConnection.bootstrapAction.kind,
+      });
 
       const sessionOptions = {
         cwd: session.cwd ?? DEFAULT_CWD,
         permissionMode: "bypassPermissions" as const,
         canUseTool,
-        model: effectiveModel,
+        model: runtimeConnection.modelHandle,
       };
 
       // Create or resume session
@@ -183,8 +177,20 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
       };
 
       if (resumeConversationId && isConversationId(resumeConversationId)) {
-        debug("creating session: resumeSession with conversationId", { resumeConversationId });
-        lettaSession = resumeSession(resumeConversationId, sessionOptions);
+        const reusableSession = acquireReusableConversationSession(
+          resumeConversationId,
+          reusableSessionSignature,
+        );
+
+        if (reusableSession) {
+          debug("creating session: reusing cached session with conversationId", { resumeConversationId });
+          lettaSession = reusableSession;
+          activeConversationId = resumeConversationId;
+          turnLockHeld = true;
+        } else {
+          debug("creating session: resumeSession with conversationId", { resumeConversationId });
+          lettaSession = resumeSession(resumeConversationId, sessionOptions);
+        }
       } else if (resumeConversationId && isAgentId(resumeConversationId)) {
         // The current SDK maps resumeSession(agentId) to a CLI --default flag path,
         // which this CLI build does not support. Use a new conversation on the
@@ -229,10 +235,14 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
       // Now initialized - update sessionId and cache agentId
       if (lettaSession.conversationId) {
         currentSessionId = lettaSession.conversationId;
+        activeConversationId = lettaSession.conversationId;
         debug("session initialized", { conversationId: lettaSession.conversationId, agentId: lettaSession.agentId });
         onSessionUpdate?.({ lettaConversationId: lettaSession.conversationId });
-        notifyCodeIslandSessionStart(currentSessionId, session.cwd);
-        notifyCodeIslandUserPrompt(currentSessionId, prompt);
+        if (!turnLockHeld) {
+          beginReusableConversationTurn(lettaSession.conversationId);
+          turnLockHeld = true;
+        }
+        beginCodeIslandObservation(currentSessionId, session.cwd, prompt);
       } else {
         log("WARNING: no conversationId available after send()");
       }
@@ -254,22 +264,29 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
         sendMessage(message);
 
         if (message.type === "tool_call") {
-          notifyCodeIslandToolRunning(currentSessionId, message.toolCallId, message.toolName);
+          mirrorCodeIslandToolRunning(currentSessionId, message.toolCallId, message.toolName);
         }
 
         if (message.type === "tool_result") {
-          notifyCodeIslandToolResult(currentSessionId, message.toolCallId, message.isError);
+          mirrorCodeIslandToolResult(currentSessionId, message.toolCallId, message.isError);
         }
 
-        if (message.type === "assistant" && message.content.trim()) {
-          notifyCodeIslandAssistantMessage(currentSessionId, message.content);
+        if (message.type === "assistant") {
+          const assistantText = normalizeMessageContent(message.content);
+          if (assistantText.trim()) {
+            mirrorCodeIslandAssistantMessage(currentSessionId, assistantText);
+          }
         }
 
         // Check for result to update session status
         if (message.type === "result") {
           const status = message.success ? "completed" : "error";
           debug("result received", { success: message.success, status });
-          notifyCodeIslandStop(currentSessionId, message.success ? undefined : { error: message.error });
+          keepReusableSession = message.success;
+          finishCodeIslandObservation(currentSessionId, {
+            success: message.success,
+            error: message.success ? undefined : String(message.error),
+          });
           sendSessionStatus(status, message.success ? undefined : { error: message.error });
         }
       }
@@ -278,7 +295,8 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
       // Query completed normally
       if (terminalStatus === null) {
         debug("query completed normally");
-        notifyCodeIslandStop(currentSessionId);
+        keepReusableSession = true;
+        finishCodeIslandObservation(currentSessionId, { success: true });
         sendSessionStatus("completed");
       }
     } catch (error) {
@@ -292,7 +310,8 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
         name: (error as Error).name,
         stack: (error as Error).stack 
       });
-      notifyCodeIslandStop(currentSessionId, { error: String(error) });
+      keepReusableSession = false;
+      finishCodeIslandObservation(currentSessionId, { error: String(error) });
       if (currentSessionId === "pending") {
         onEvent({
           type: "runner.error",
@@ -303,7 +322,26 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
       sendSessionStatus("error", { error: String(error) });
     } finally {
       debug("runLetta finally block, clearing activeLettaSession");
+      try {
+        if (activeLettaSession) {
+          if (activeConversationId && turnLockHeld) {
+            completeReusableConversationTurn(
+              activeLettaSession,
+              reusableSessionSignature,
+              keepReusableSession,
+            );
+          } else {
+            activeLettaSession.close();
+          }
+        }
+      } catch (closeError) {
+        log("WARNING: failed to close Letta session transport", {
+          error: String(closeError),
+        });
+      }
       activeLettaSession = null;
+      activeConversationId = null;
+      turnLockHeld = false;
     }
   })();
 

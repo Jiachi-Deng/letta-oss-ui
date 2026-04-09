@@ -1,69 +1,29 @@
 import { app, BrowserWindow, ipcMain, dialog, globalShortcut, Menu } from "electron"
-import { execSync } from "child_process";
 import { ipcMainHandle, isDev, DEV_PORT } from "./util.js";
 import { getPreloadPath, getUIPath, getIconPath } from "./pathResolver.js";
 import { getStaticData, pollResources, stopPolling } from "./test.js";
 import { handleClientEvent, cleanupAllSessions } from "./ipc-handlers.js";
 import type { ClientEvent } from "./types.js";
-import { getAppConfigState, initializeAppConfig, saveAppConfig } from "./libs/config.js";
+import { getAppConfigState, saveAppConfig } from "./libs/config.js";
 import {
-    configureBundledLettaServerEnv,
-    ensureBundledLettaServerStarted,
     getBundledLettaServerRuntimeStatus,
-    stopBundledLettaServer,
 } from "./libs/bundled-letta-server.js";
 import {
-    ensureCodeIslandStarted,
     getCodeIslandRuntimeStatus,
-    startCodeIslandMonitor,
     type CodeIslandMonitorHandle,
 } from "./libs/bundled-codeisland.js";
+import {
+    bootstrapElectronRuntime,
+    stopElectronDevelopmentServer,
+    stopElectronRuntimeServices,
+    startElectronRuntimeServices,
+} from "./libs/main-runtime.js";
 
-const PRODUCT_NAME = "Letta";
-const APP_ID = "com.jachi.letta";
-
-configureRuntimeIdentity();
-configureBundledLettaServerEnv();
-initializeAppConfig();
-
-function configureRuntimeIdentity(): void {
-    app.setName(PRODUCT_NAME);
-
-    if (process.platform === "win32") {
-        app.setAppUserModelId(APP_ID);
-    }
-}
-
-// Find letta CLI
-try {
-  const whichCmd = process.platform === 'win32' ? 'where letta' : 'which letta';
-  const lettaPath = execSync(whichCmd, { encoding: "utf-8" }).trim();
-  if (lettaPath) {
-    // On Windows, 'where' may return multiple lines - take the first one
-    const firstPath = lettaPath.split('\n')[0].trim();
-    process.env.LETTA_CLI_PATH = firstPath;
-    console.log("Found letta CLI at:", firstPath);
-  }
-} catch (e) {
-  console.warn("Could not find letta CLI:", e);
-}
+bootstrapElectronRuntime();
 
 let cleanupComplete = false;
 let mainWindow: BrowserWindow | null = null;
 let codeIslandMonitor: CodeIslandMonitorHandle | null = null;
-
-function killViteDevServer(): void {
-    if (!isDev()) return;
-    try {
-        if (process.platform === 'win32') {
-            execSync(`for /f "tokens=5" %a in ('netstat -ano ^| findstr :${DEV_PORT}') do taskkill /PID %a /F`, { stdio: 'ignore', shell: 'cmd.exe' });
-        } else {
-            execSync(`lsof -ti:${DEV_PORT} | xargs kill -9 2>/dev/null || true`, { stdio: 'ignore' });
-        }
-    } catch {
-        // Process may already be dead
-    }
-}
 
 function cleanup(): void {
     if (cleanupComplete) return;
@@ -71,11 +31,10 @@ function cleanup(): void {
 
     globalShortcut.unregisterAll();
     stopPolling();
-    codeIslandMonitor?.stop();
+    stopElectronRuntimeServices(codeIslandMonitor);
     codeIslandMonitor = null;
-    stopBundledLettaServer();
     cleanupAllSessions();
-    killViteDevServer();
+    stopElectronDevelopmentServer();
 }
 
 function handleSignal(): void {
@@ -98,25 +57,8 @@ app.on("ready", () => {
     process.on("SIGINT", handleSignal);
     process.on("SIGHUP", handleSignal);
 
-    void ensureBundledLettaServerStarted()
-        .then((startup) => {
-            if (startup.status !== "unsupported") {
-                console.log(`[letta-server] Startup status: ${startup.status}`);
-            }
-        })
-        .catch((error) => {
-            console.error("[letta-server] Failed to start bundled server:", error);
-        });
-
-    const codeIslandStartup = ensureCodeIslandStarted();
-    codeIslandMonitor = startCodeIslandMonitor();
-    if (codeIslandStartup.status === "launched" && codeIslandStartup.resolution) {
-        console.log(`[codeisland] Launched ${codeIslandStartup.resolution.source} app at ${codeIslandStartup.resolution.appPath}`);
-    } else if (codeIslandStartup.status === "already-running") {
-        console.log("[codeisland] Already running; skipping startup launch.");
-    } else if (codeIslandStartup.status === "missing") {
-        console.warn("[codeisland] CodeIsland.app was not found. Skipping startup launch.");
-    }
+    const runtimeServices = startElectronRuntimeServices();
+    codeIslandMonitor = runtimeServices.codeIslandMonitor;
 
     // Create main window
     mainWindow = new BrowserWindow({

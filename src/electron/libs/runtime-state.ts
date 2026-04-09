@@ -1,6 +1,9 @@
 /**
- * Simple in-memory runtime state for active sessions.
- * No persistence needed - Letta handles conversation/message storage.
+ * Transient in-memory projection of active sessions for the desktop UI.
+ *
+ * Letta server is the persistence authority for conversations, messages, and
+ * agent state. This module only keeps ephemeral view/cache state so the app can
+ * render active sessions and pending approvals while a turn is in flight.
  */
 
 import type {
@@ -17,7 +20,7 @@ export type PendingPermission = {
   resolve: (result: CanUseToolResponse) => void;
 };
 
-export type RuntimeSession = {
+export type SessionProjection = {
   conversationId: string;
   title: string;
   cwd?: string;
@@ -30,10 +33,10 @@ export type RuntimeSession = {
   messages: StreamMessage[];
 };
 
-// In-memory state for active sessions
-const sessions = new Map<string, RuntimeSession>();
+// In-memory projection cache for active sessions.
+const sessionProjections = new Map<string, SessionProjection>();
 
-type RuntimeSessionSeed = {
+type SessionProjectionSeed = {
   title?: string;
   cwd?: string;
   createdAt?: number;
@@ -49,17 +52,17 @@ function now(): number {
   return Date.now();
 }
 
-export function createRuntimeSession(
+export function createSessionProjection(
   conversationId: string,
-  seed: RuntimeSessionSeed = {},
-): RuntimeSession {
-  const existing = sessions.get(conversationId);
+  seed: SessionProjectionSeed = {},
+): SessionProjection {
+  const existing = sessionProjections.get(conversationId);
   if (existing) {
-    return updateSession(conversationId, seed) ?? existing;
+    return updateSessionProjection(conversationId, seed) ?? existing;
   }
 
   const timestamp = seed.createdAt ?? now();
-  const session: RuntimeSession = {
+  const session: SessionProjection = {
     conversationId,
     title: seed.title ?? conversationId,
     cwd: seed.cwd,
@@ -71,19 +74,19 @@ export function createRuntimeSession(
     pendingPermissions: seed.pendingPermissions ?? new Map(),
     messages: seed.messages ? [...seed.messages] : [],
   };
-  sessions.set(conversationId, session);
+  sessionProjections.set(conversationId, session);
   return session;
 }
 
-export function getSession(conversationId: string): RuntimeSession | undefined {
-  return sessions.get(conversationId);
+export function getSessionProjection(conversationId: string): SessionProjection | undefined {
+  return sessionProjections.get(conversationId);
 }
 
-export function updateSession(
+export function updateSessionProjection(
   conversationId: string,
-  updates: Partial<RuntimeSession>,
-): RuntimeSession | undefined {
-  const session = sessions.get(conversationId);
+  updates: Partial<SessionProjection>,
+): SessionProjection | undefined {
+  const session = sessionProjections.get(conversationId);
   if (!session) return undefined;
   Object.assign(session, {
     ...updates,
@@ -92,22 +95,22 @@ export function updateSession(
   return session;
 }
 
-export function rekeyRuntimeSession(
+export function rekeySessionProjection(
   previousConversationId: string,
   nextConversationId: string,
-  updates: RuntimeSessionSeed = {},
-): RuntimeSession {
+  updates: SessionProjectionSeed = {},
+): SessionProjection {
   if (previousConversationId === nextConversationId) {
-    return createRuntimeSession(nextConversationId, updates);
+    return createSessionProjection(nextConversationId, updates);
   }
 
-  const existing = sessions.get(previousConversationId);
+  const existing = sessionProjections.get(previousConversationId);
   if (!existing) {
-    return createRuntimeSession(nextConversationId, updates);
+    return createSessionProjection(nextConversationId, updates);
   }
 
-  sessions.delete(previousConversationId);
-  const session: RuntimeSession = {
+  sessionProjections.delete(previousConversationId);
+  const session: SessionProjection = {
     ...existing,
     conversationId: nextConversationId,
     title: updates.title ?? existing.title,
@@ -120,12 +123,12 @@ export function rekeyRuntimeSession(
     pendingPermissions: updates.pendingPermissions ?? existing.pendingPermissions,
     messages: updates.messages ? [...updates.messages] : [...existing.messages],
   };
-  sessions.set(nextConversationId, session);
+  sessionProjections.set(nextConversationId, session);
   return session;
 }
 
-export function deleteSession(conversationId: string): boolean {
-  return sessions.delete(conversationId);
+export function deleteSessionProjection(conversationId: string): boolean {
+  return sessionProjections.delete(conversationId);
 }
 
 function mergeStreamingMessage(
@@ -168,18 +171,18 @@ function mergeStreamingMessage(
   return nextMessages;
 }
 
-export function appendSessionMessage(
+export function appendSessionProjectionMessage(
   conversationId: string,
   message: StreamMessage,
-): RuntimeSession {
-  const session = createRuntimeSession(conversationId);
+): SessionProjection {
+  const session = createSessionProjection(conversationId);
   session.messages = mergeStreamingMessage(session.messages, message);
   session.updatedAt = now();
   return session;
 }
 
-export function listRuntimeSessions(): SessionInfo[] {
-  return [...sessions.values()]
+export function listSessionProjections(): SessionInfo[] {
+  return [...sessionProjections.values()]
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .map((session) => ({
       id: session.conversationId,
@@ -192,10 +195,22 @@ export function listRuntimeSessions(): SessionInfo[] {
     }));
 }
 
-export function getSessionHistory(conversationId: string): StreamMessage[] {
-  return sessions.get(conversationId)?.messages.map((message) => ({ ...message })) ?? [];
+export function getSessionProjectionHistory(conversationId: string): StreamMessage[] {
+  return sessionProjections.get(conversationId)?.messages.map((message) => ({ ...message })) ?? [];
 }
 
-export function getAllSessions(): Map<string, RuntimeSession> {
-  return sessions;
+export function getAllSessionProjections(): Map<string, SessionProjection> {
+  return sessionProjections;
 }
+
+// Compatibility aliases for existing call sites. The canonical API is the
+// projection/cache naming above.
+export const createRuntimeSession = createSessionProjection;
+export const getSession = getSessionProjection;
+export const updateSession = updateSessionProjection;
+export const rekeyRuntimeSession = rekeySessionProjection;
+export const deleteSession = deleteSessionProjection;
+export const appendSessionMessage = appendSessionProjectionMessage;
+export const listRuntimeSessions = listSessionProjections;
+export const getSessionHistory = getSessionProjectionHistory;
+export const getAllSessions = getAllSessionProjections;

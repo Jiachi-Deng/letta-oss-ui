@@ -1,29 +1,32 @@
 /**
- * Letta SDK message types for UI communication.
+ * App-facing message types for UI communication.
+ * Normalization lives in src/shared/message-normalizer.ts.
  */
 
-// Re-export SDK types
-export type {
-  SDKMessage,
-  SDKInitMessage,
-  SDKAssistantMessage,
-  SDKToolCallMessage,
-  SDKToolResultMessage,
-  SDKReasoningMessage,
-  SDKResultMessage,
-  SDKStreamEventMessage,
-  CanUseToolResponse,
-} from "@letta-ai/letta-code-sdk";
+import type {
+  AppAssistantMessage,
+  AppInitMessage,
+  AppMessage,
+  AppReasoningMessage,
+  AppResultMessage,
+  AppStreamEventMessage,
+  AppStreamMessage,
+  AppToolCallMessage,
+  AppToolResultMessage,
+  UserPromptMessage,
+} from "../shared/message-normalizer.js";
+import type { CanUseToolResponse } from "@letta-ai/letta-code-sdk";
 
-export type UserPromptMessage = {
-  type: "user_prompt";
-  prompt: string;
-};
-
-// Import for union type and local use
-import type { SDKMessage, CanUseToolResponse } from "@letta-ai/letta-code-sdk";
-
-export type StreamMessage = SDKMessage | UserPromptMessage;
+export type SDKMessage = AppStreamMessage;
+export type SDKInitMessage = AppInitMessage;
+export type SDKAssistantMessage = AppAssistantMessage;
+export type SDKToolCallMessage = AppToolCallMessage;
+export type SDKToolResultMessage = AppToolResultMessage;
+export type SDKReasoningMessage = AppReasoningMessage;
+export type SDKResultMessage = AppResultMessage;
+export type SDKStreamEventMessage = AppStreamEventMessage;
+export type StreamMessage = AppMessage;
+export type { UserPromptMessage, CanUseToolResponse };
 
 export type SessionStatus = "idle" | "running" | "completed" | "error";
 

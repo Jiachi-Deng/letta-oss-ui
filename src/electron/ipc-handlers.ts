@@ -1,17 +1,25 @@
 import { BrowserWindow } from "electron";
 import type { ClientEvent, ServerEvent } from "./types.js";
-import { clearCodeIslandSession, notifyCodeIslandStop } from "./libs/codeisland.js";
+import {
+  clearCodeIslandObservation,
+  finishCodeIslandObservation,
+} from "./libs/codeisland-observer.js";
 import { runLetta, type RunnerHandle } from "./libs/runner.js";
+import {
+  discardAllReusableConversationSessions,
+  discardReusableConversationSession,
+  isConversationTurnActive,
+} from "./libs/conversation-session-cache.js";
 import type { PendingPermission } from "./libs/runtime-state.js";
 import {
-  appendSessionMessage,
-  createRuntimeSession,
-  deleteSession,
-  getSession,
-  getSessionHistory,
-  listRuntimeSessions,
-  rekeyRuntimeSession,
-  updateSession,
+  appendSessionProjectionMessage,
+  createSessionProjection,
+  deleteSessionProjection,
+  getSessionProjection,
+  getSessionProjectionHistory,
+  listSessionProjections,
+  rekeySessionProjection,
+  updateSessionProjection,
 } from "./libs/runtime-state.js";
 
 const DEBUG = process.env.DEBUG_IPC === "true";
@@ -32,8 +40,14 @@ const debug = (msg: string, data?: Record<string, unknown>) => {
   log(msg, data);
 };
 
-// Track active runner handles
+// Track active runner handles.
+// The runner owns transport/process finalization; IPC only keeps bookkeeping
+// so it can signal abort and forget finished handles.
 const runnerHandles = new Map<string, RunnerHandle>();
+
+function releaseRunnerHandle(conversationId: string): void {
+  runnerHandles.delete(conversationId);
+}
 
 function broadcast(event: ServerEvent) {
   const payload = JSON.stringify(event);
@@ -45,16 +59,16 @@ function broadcast(event: ServerEvent) {
 
 function emit(event: ServerEvent) {
   if (event.type === "session.status") {
-    const existing = getSession(event.payload.sessionId);
+    const existing = getSessionProjection(event.payload.sessionId);
     if (existing) {
-      updateSession(event.payload.sessionId, {
+      updateSessionProjection(event.payload.sessionId, {
         status: event.payload.status,
         title: event.payload.title ?? existing.title,
         cwd: event.payload.cwd ?? existing.cwd,
         error: event.payload.error,
       });
     } else if (event.payload.sessionId !== "pending") {
-      createRuntimeSession(event.payload.sessionId, {
+      createSessionProjection(event.payload.sessionId, {
         status: event.payload.status,
         title: event.payload.title ?? event.payload.sessionId,
         cwd: event.payload.cwd,
@@ -63,19 +77,20 @@ function emit(event: ServerEvent) {
     }
 
     if (event.payload.status === "completed" || event.payload.status === "error") {
-      runnerHandles.delete(event.payload.sessionId);
+      // Bookkeeping only: runner.ts owns the actual transport/process close.
+      releaseRunnerHandle(event.payload.sessionId);
     }
   }
 
   if (event.type === "stream.user_prompt") {
-    appendSessionMessage(event.payload.sessionId, {
+    appendSessionProjectionMessage(event.payload.sessionId, {
       type: "user_prompt",
       prompt: event.payload.prompt,
     });
   }
 
   if (event.type === "stream.message") {
-    appendSessionMessage(event.payload.sessionId, event.payload.message);
+    appendSessionProjectionMessage(event.payload.sessionId, event.payload.message);
   }
 
   broadcast(event);
@@ -85,19 +100,19 @@ export async function handleClientEvent(event: ClientEvent) {
   debug(`handleClientEvent: ${event.type}`, { payload: 'payload' in event ? event.payload : undefined });
   
   if (event.type === "session.list") {
-    emit({ type: "session.list", payload: { sessions: listRuntimeSessions() } });
+    emit({ type: "session.list", payload: { sessions: listSessionProjections() } });
     return;
   }
 
   if (event.type === "session.history") {
     const conversationId = event.payload.sessionId;
-    const session = getSession(conversationId);
+    const session = getSessionProjection(conversationId);
     emit({
       type: "session.history",
       payload: {
         sessionId: conversationId,
         status: session?.status ?? "idle",
-        messages: getSessionHistory(conversationId),
+        messages: getSessionProjectionHistory(conversationId),
       },
     });
     return;
@@ -136,7 +151,7 @@ export async function handleClientEvent(event: ClientEvent) {
             conversationId = updates.lettaConversationId;
             debug("session.start: session initialized", { conversationId });
             
-            createRuntimeSession(conversationId, {
+            createSessionProjection(conversationId, {
               title: event.payload.title || conversationId,
               cwd: event.payload.cwd,
               status: "running",
@@ -171,12 +186,24 @@ export async function handleClientEvent(event: ClientEvent) {
   if (event.type === "session.continue") {
     const conversationId = event.payload.sessionId;
     debug("session.continue: continuing session", { conversationId, prompt: event.payload.prompt.slice(0, 50) });
+
+    if (isConversationTurnActive(conversationId)) {
+      emit({
+        type: "session.status",
+        payload: {
+          sessionId: conversationId,
+          status: "error",
+          error: "Conversation already has an active reusable turn.",
+        },
+      });
+      return;
+    }
     
-    let runtimeSession = getSession(conversationId);
+    let runtimeSession = getSessionProjection(conversationId);
     
     if (!runtimeSession) {
       debug("session.continue: no runtime session found, creating new one");
-      runtimeSession = createRuntimeSession(conversationId, {
+      runtimeSession = createSessionProjection(conversationId, {
         title: conversationId,
         cwd: event.payload.cwd,
       });
@@ -184,7 +211,7 @@ export async function handleClientEvent(event: ClientEvent) {
       debug("session.continue: found existing runtime session", { status: runtimeSession.status });
     }
 
-    updateSession(conversationId, { status: "running" });
+    updateSessionProjection(conversationId, { status: "running" });
     emit({
       type: "session.status",
       payload: { sessionId: conversationId, status: "running" },
@@ -227,7 +254,7 @@ export async function handleClientEvent(event: ClientEvent) {
             });
             actualConversationId = updates.lettaConversationId;
             
-            rekeyRuntimeSession(conversationId, actualConversationId, {
+            rekeySessionProjection(conversationId, actualConversationId, {
               title: actualConversationId,
               cwd: event.payload.cwd,
               status: "running",
@@ -262,7 +289,7 @@ export async function handleClientEvent(event: ClientEvent) {
       runnerHandles.set(actualConversationId, handle);
     } catch (error) {
       log("session.continue: ERROR", { error: String(error) });
-      updateSession(conversationId, { status: "error" });
+      updateSessionProjection(conversationId, { status: "error" });
       emit({
         type: "session.status",
         payload: { sessionId: conversationId, status: "error", error: String(error) },
@@ -274,16 +301,20 @@ export async function handleClientEvent(event: ClientEvent) {
   if (event.type === "session.stop") {
     const conversationId = event.payload.sessionId;
     debug("session.stop: stopping session", { conversationId });
-    notifyCodeIslandStop(conversationId, { reason: "user" });
+    finishCodeIslandObservation(conversationId, { reason: "user", success: false });
     const handle = runnerHandles.get(conversationId);
     if (handle) {
       debug("session.stop: aborting handle");
-      handle.abort();
-      runnerHandles.delete(conversationId);
+      try {
+        await handle.abort();
+      } finally {
+        releaseRunnerHandle(conversationId);
+      }
     } else {
       debug("session.stop: no handle found");
     }
-    updateSession(conversationId, { status: "idle" });
+    discardReusableConversationSession(conversationId);
+    updateSessionProjection(conversationId, { status: "idle" });
     emit({
       type: "session.status",
       payload: { sessionId: conversationId, status: "idle" },
@@ -293,14 +324,18 @@ export async function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "session.delete") {
     const conversationId = event.payload.sessionId;
-    notifyCodeIslandStop(conversationId, { reason: "user" });
+    finishCodeIslandObservation(conversationId, { reason: "user", success: false });
     const handle = runnerHandles.get(conversationId);
     if (handle) {
-      handle.abort();
-      runnerHandles.delete(conversationId);
+      try {
+        await handle.abort();
+      } finally {
+        releaseRunnerHandle(conversationId);
+      }
     }
-    deleteSession(conversationId);
-    clearCodeIslandSession(conversationId);
+    deleteSessionProjection(conversationId);
+    clearCodeIslandObservation(conversationId);
+    discardReusableConversationSession(conversationId);
     
     // Note: Letta client may not have a delete method for conversations
     // The conversation will remain in Letta but be removed from our UI
@@ -310,7 +345,7 @@ export async function handleClientEvent(event: ClientEvent) {
   }
 
   if (event.type === "permission.response") {
-    const session = getSession(event.payload.sessionId);
+    const session = getSessionProjection(event.payload.sessionId);
     if (!session) return;
 
     const pending = session.pendingPermissions.get(event.payload.toolUseId);
@@ -322,10 +357,19 @@ export async function handleClientEvent(event: ClientEvent) {
 }
 
 export function cleanupAllSessions(): void {
-  for (const [conversationId, handle] of runnerHandles) {
-    notifyCodeIslandStop(conversationId, { reason: "user" });
-    handle.abort();
-    clearCodeIslandSession(conversationId);
+  try {
+    for (const [conversationId, handle] of runnerHandles) {
+      finishCodeIslandObservation(conversationId, { reason: "user", success: false });
+      void handle.abort().catch((error) => {
+        log("cleanupAllSessions: abort failed", {
+          conversationId,
+          error: String(error),
+        });
+      });
+      clearCodeIslandObservation(conversationId);
+    }
+  } finally {
+    runnerHandles.clear();
+    discardAllReusableConversationSessions();
   }
-  runnerHandles.clear();
 }
