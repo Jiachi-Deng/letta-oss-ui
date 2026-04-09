@@ -12,7 +12,7 @@
 		"dev:electron": "bun run transpile:electron && cross-env NODE_ENV=development electron .",
 		"test": "vitest",
 		"test:run": "vitest run",
-		"sync:letta-code": "bun run --cwd ../letta-code build && bun install && node ./scripts/sync-letta-code.mjs",
+		"sync:letta-code": "bun run --cwd ../../vendor/letta-code build && bun install && node ./scripts/sync-letta-code.mjs",
 		"build:letta-server": "node ./scripts/build-letta-server.mjs",
 		"verify:letta-server": "node ./scripts/verify-letta-server.mjs",
 		"smoke:letta-server": "node ./scripts/smoke-letta-server.mjs",
@@ -30,9 +30,9 @@
 		"dist:linux": "bun run transpile:electron && bun run build && electron-builder --linux --x64"
 	},
 	"dependencies": {
-		"@letta-ai/letta-code": "file:../letta-code",
+		"@letta-ai/letta-code": "file:../../vendor/letta-code",
 		"@letta-ai/letta-client": "1.10.1",
-		"@letta-ai/letta-code-sdk": "file:../letta-code-sdk-local",
+		"@letta-ai/letta-code-sdk": "file:../../vendor/letta-code-sdk-local",
 		"@radix-ui/react-dialog": "^1.1.15",
 		"@radix-ui/react-dropdown-menu": "^2.1.16",
 		"@tailwindcss/vite": "^4.1.18",

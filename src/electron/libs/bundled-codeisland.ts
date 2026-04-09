@@ -65,7 +65,11 @@ function getRuntimeContext(): CodeIslandRuntimeContext {
 }
 
 function getDevelopmentBuildCandidates(context: CodeIslandRuntimeContext): string[] {
+  const workspaceRoot = path.resolve(context.appPath, "../../..");
   return [
+    path.resolve(workspaceRoot, "vendor", "code-island", ".build", "release", CODEISLAND_APP_NAME),
+    path.resolve(workspaceRoot, "vendor", "code-island", ".build", "arm64-apple-macosx", "release", CODEISLAND_APP_NAME),
+    path.resolve(workspaceRoot, "vendor", "code-island", ".build", "x86_64-apple-macosx", "release", CODEISLAND_APP_NAME),
     path.resolve(context.appPath, "..", "code-island", ".build", "release", CODEISLAND_APP_NAME),
     path.resolve(context.appPath, "..", "code-island", ".build", "arm64-apple-macosx", "release", CODEISLAND_APP_NAME),
     path.resolve(context.appPath, "..", "code-island", ".build", "x86_64-apple-macosx", "release", CODEISLAND_APP_NAME),

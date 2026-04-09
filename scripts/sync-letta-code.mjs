@@ -4,7 +4,12 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const workspaceDir = resolve(scriptDir, "..");
-const sourceDir = resolve(workspaceDir, "../letta-code");
+const workspaceRoot = resolve(workspaceDir, "../..");
+const lettaCodeCandidates = [
+  resolve(workspaceRoot, "vendor/letta-code"),
+  resolve(workspaceDir, "../letta-code"),
+];
+const sourceDir = lettaCodeCandidates.find((candidate) => existsSync(candidate)) ?? lettaCodeCandidates[0];
 
 const packagePaths = [
   resolve(workspaceDir, "node_modules/@letta-ai/letta-code"),

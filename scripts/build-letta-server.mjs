@@ -17,7 +17,18 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const lettaUiRoot = path.resolve(scriptDir, "..");
-const repoRoot = path.resolve(lettaUiRoot, "..");
+const workspaceRoot = path.resolve(lettaUiRoot, "../..");
+const sourceRepoCandidates = [
+  path.join(workspaceRoot, "vendor", "letta-monorepo"),
+  path.resolve(lettaUiRoot, ".."),
+];
+const runtimeVenvCandidates = [
+  path.join(workspaceRoot, "runtime", "python", "venv"),
+  path.join(workspaceRoot, "vendor", "letta-monorepo", "venv"),
+  path.resolve(lettaUiRoot, "..", "venv"),
+];
+const repoRoot = sourceRepoCandidates.find((candidate) => existsSync(candidate)) ?? sourceRepoCandidates[0];
+const sourceVenvRoot = runtimeVenvCandidates.find((candidate) => existsSync(candidate)) ?? runtimeVenvCandidates[0];
 const stageRoot = path.join(lettaUiRoot, "build-resources", "LettaServer");
 const stageAppRoot = path.join(stageRoot, "app");
 const stageManifestPath = path.join(stageRoot, "manifest.json");
@@ -272,9 +283,9 @@ function verifyBundledServerLayout() {
 function resolveBundledNltkSource() {
   const candidateRoots = [
     path.join(process.env.HOME ?? "", "nltk_data"),
-    path.join(repoRoot, "venv", "nltk_data"),
-    path.join(repoRoot, "venv", "share", "nltk_data"),
-    path.join(repoRoot, "venv", "lib", "nltk_data"),
+    path.join(sourceVenvRoot, "nltk_data"),
+    path.join(sourceVenvRoot, "share", "nltk_data"),
+    path.join(sourceVenvRoot, "lib", "nltk_data"),
   ];
 
   for (const candidateRoot of candidateRoots) {
@@ -319,7 +330,7 @@ function tryCommand(command, args) {
 function resolveBuildPython() {
   const candidates = [
     process.env.LETTA_BUNDLED_PYTHON,
-    path.join(repoRoot, "venv", "bin", "python3"),
+    path.join(sourceVenvRoot, "bin", "python3"),
     "python3.11",
     "python3",
   ].filter(Boolean);
@@ -388,8 +399,7 @@ function getFullPythonVersion(pythonVersion) {
 
 function resolveSourceSitePackages(pythonAbiTag) {
   const candidate = path.join(
-    repoRoot,
-    "venv",
+    sourceVenvRoot,
     "lib",
     `python${pythonAbiTag}`,
     "site-packages",

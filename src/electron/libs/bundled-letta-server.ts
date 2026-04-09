@@ -141,11 +141,13 @@ function resolveCandidate(source: BundledLettaServerResolution["source"], rootPa
 export function resolveBundledLettaServer(): BundledLettaServerResolution | null {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   const lettaUiRoot = path.resolve(moduleDir, "../../..");
-  const repoRoot = path.resolve(lettaUiRoot, "..");
+  const workspaceRoot = path.resolve(lettaUiRoot, "../..");
+  const repoRoot = path.join(workspaceRoot, "vendor", "letta-monorepo");
   const candidates: Array<[BundledLettaServerResolution["source"], string]> = [
     ["bundled", path.join(process.resourcesPath, "LettaServer")],
     ["build-resource", path.join(lettaUiRoot, "build-resources", "LettaServer")],
     ["build-resource", path.join(process.cwd(), "build-resources", "LettaServer")],
+    ["dev-venv", path.join(workspaceRoot, "runtime", "python", "venv")],
     ["dev-venv", path.join(repoRoot, "venv")],
     ["dev-venv", path.join(process.cwd(), "venv")],
   ];

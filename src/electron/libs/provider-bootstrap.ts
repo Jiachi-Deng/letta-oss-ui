@@ -80,6 +80,7 @@ function getCompatibleProviderSpec(
 function resolveLocalCliCandidates(): string[] {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const packagedResourcesRoot = process.resourcesPath;
+  const workspaceRoot = resolve(moduleDir, "../../../../..");
 
   return [
     resolve(
@@ -90,6 +91,7 @@ function resolveLocalCliCandidates(): string[] {
       packagedResourcesRoot,
       "node_modules/@letta-ai/letta-code/letta.js",
     ),
+    resolve(workspaceRoot, "vendor/letta-code/letta.js"),
     resolve(moduleDir, "../../../../letta-code/letta.js"),
     resolve(moduleDir, "../../../node_modules/@letta-ai/letta-code/letta.js"),
     resolve(process.cwd(), "letta-ui/node_modules/@letta-ai/letta-code/letta.js"),

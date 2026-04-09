@@ -5,8 +5,13 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const lettaUiRoot = path.resolve(scriptDir, "..");
-const repoRoot = path.resolve(lettaUiRoot, "..");
-const codeIslandRoot = path.join(repoRoot, "code-island");
+const workspaceRoot = path.resolve(lettaUiRoot, "../..");
+const codeIslandCandidates = [
+  path.join(workspaceRoot, "vendor", "code-island"),
+  path.resolve(lettaUiRoot, "..", "code-island"),
+  path.resolve(lettaUiRoot, "../..", "code-island"),
+];
+const codeIslandRoot = codeIslandCandidates.find((candidate) => existsSync(candidate)) ?? codeIslandCandidates[0];
 const stageRoot = path.join(lettaUiRoot, "build-resources");
 const stagedAppPath = path.join(stageRoot, "CodeIsland.app");
 
