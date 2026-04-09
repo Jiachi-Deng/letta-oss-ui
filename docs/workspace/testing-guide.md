@@ -309,6 +309,24 @@ cd /Users/jachi/Desktop/letta-workspace
 - `sw_vers`
 - diagnostics summary
 
+### `E_CODEISLAND_BUNDLE_MISSING`
+
+含义：
+
+- 当前这份安装包或运行环境里没有找到 `CodeIsland.app`
+
+常见现象：
+
+- Letta 主窗口能开
+- 聊天功能可能正常
+- CodeIsland 完全没有可启动对象
+
+先看什么：
+
+- 安装包里是否真的带了嵌套的 `CodeIsland.app`
+- `Contents/Resources` 下是否存在 companion app
+- diagnostics 里的 bundle resolve 相关 steps
+
 ### `E_CODEISLAND_LAUNCH_BLOCKED`
 
 含义：
@@ -343,6 +361,64 @@ cd /Users/jachi/Desktop/letta-workspace
 - session init 相关 steps
 - `runner` 边界的 diagnostics
 
+### `E_HISTORY_LOAD_FAILED`
+
+含义：
+
+- 某个 session 的历史消息读取失败
+
+常见现象：
+
+- 会话本身存在
+- 但点开或切换时历史加载失败
+- diagnostics 直接指向 history load failure
+
+先看什么：
+
+- `SESSION_HISTORY_001 / 002 / 003`
+- session projection 是否存在
+- 本地 history cache / projection lookup 是否异常
+
+### `E_PERMISSION_RESPONSE_MISSING`
+
+含义：
+
+- 收到了一条 permission response，但当前没有匹配的 pending request
+
+常见现象：
+
+- 审批类工具流程异常
+- UI 已经允许/拒绝了，但运行时没有正确接住
+- diagnostics 指向 permission response missing
+
+先看什么：
+
+- `PERMISSION_REQUEST_*`
+- `PERMISSION_RESPONSE_*`
+- `toolUseId` 是否真的一一对应
+
+### `E_STREAM_EMPTY_RESULT`
+
+含义：
+
+- 这轮运行在流程上结束了，但没有真正产出 assistant 输出
+
+常见现象：
+
+- 发送看起来成功
+- 没有明确失败提示
+- 但 UI 没有收到有效回复
+
+先看什么：
+
+- `STREAM_001 / STREAM_002 / STREAM_EMPTY_RESULT_001`
+- model response / stream translation
+- diagnostics 里是否只有 result，没有 assistant text
+
+补充说明：
+
+- `E_STREAM_NO_ASSISTANT_OUTPUT` 现在是它的兼容别名，排障时按同一类问题看
+
 ### `E_ASSISTANT_CONTENT_PARSE_FAILED`
 
 含义：
@@ -376,6 +452,24 @@ cd /Users/jachi/Desktop/letta-workspace
 - `CLI_CONNECT_001` 到 `CLI_CONNECT_006`
 - CLI 路径是否正确
 - Node / Electron runtime 环境
+
+### `E_LETTA_CLI_GLOBAL_SHADOWED`
+
+含义：
+
+- app 本来应该使用自带的 CLI，但实际命中了系统全局 `letta`
+
+常见现象：
+
+- 本机开发环境能跑
+- 安装版首装失败
+- CLI 参数报“不认识”或行为和预期版本不一致
+
+先看什么：
+
+- `LETTA_CLI_PATH`
+- diagnostics 里的 CLI resolve / bootstrap steps
+- 当前实际命中的 CLI 路径是不是 `/usr/local/bin/letta` 一类的全局路径
 
 ### `E_LETTA_CLI_EXIT_NON_ZERO`
 
@@ -429,6 +523,24 @@ cd /Users/jachi/Desktop/letta-workspace
 - `CI_MONITOR_001 / 002 / 003 / 004`
 - 最近一次 launch command 结果
 - 是否存在系统级拦截或 quarantine
+
+### `E_SESSION_STOP_FAILED`
+
+含义：
+
+- 用户触发 stop 时，运行时的 abort / shutdown 清理没有完全成功
+
+常见现象：
+
+- 点停止后状态异常
+- 会话表面停了，但底层清理没完全收口
+- diagnostics 指向 stop failed
+
+先看什么：
+
+- `SESSION_STOP_001 / 002 / 003`
+- runner transport abort 路径
+- session cleanup 是否完整执行
 
 ### `E_SERVER_START_FAILED`
 
