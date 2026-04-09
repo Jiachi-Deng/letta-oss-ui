@@ -10,6 +10,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -36,7 +37,7 @@ const stageVenvPath = path.join(stageRoot, "venv");
 const stagePythonPath = path.join(stageVenvPath, "bin", "python3");
 const stagePythonBaseRoot = path.join(stageRoot, "python-base");
 const stageNltkDataRoot = path.join(stageRoot, "nltk_data");
-const LAYOUT_VERSION = 8;
+const LAYOUT_VERSION = 9;
 const DIST_INFO_METADATA_FILES = new Set(["INSTALLER", "RECORD", "REQUESTED", "direct_url.json"]);
 const TRANSIENT_DIR_NAMES = new Set(["__pycache__", ".pytest_cache", "tests", "test", "testing"]);
 const TRANSIENT_ROOT_PREFIXES = ["server-home", "logs"];
@@ -115,6 +116,11 @@ function removePath(targetPath) {
     maxRetries: 5,
     retryDelay: 200,
   });
+}
+
+function resetSymlink(linkPath, target) {
+  removePath(linkPath);
+  symlinkSync(target, linkPath);
 }
 
 function removeMatchingChildren(parentDir, matcher) {
@@ -447,11 +453,29 @@ function stageFromLocalVenv(sourceSitePackages) {
   });
   copyBundledNltkData();
 
-  cpSync(buildPython.frameworkRoot, path.join(stagePythonBaseRoot, "Python.framework"), {
+  const stageFrameworkRoot = path.join(stagePythonBaseRoot, "Python.framework");
+  const stageFrameworkVersionRoot = path.join(
+    stageFrameworkRoot,
+    "Versions",
+    getPythonAbiTag(buildPython.version),
+  );
+
+  cpSync(buildPython.frameworkRoot, stageFrameworkRoot, {
     recursive: true,
     force: true,
     dereference: false,
   });
+
+  // Homebrew's cellar layout is not a complete standalone macOS framework bundle.
+  // Rebuild the canonical symlink structure so downstream codesign sees a valid framework.
+  resetSymlink(path.join(stageFrameworkRoot, "Versions", "Current"), getPythonAbiTag(buildPython.version));
+  resetSymlink(path.join(stageFrameworkRoot, "Python"), path.join("Versions", "Current", "Python"));
+  resetSymlink(path.join(stageFrameworkRoot, "Resources"), path.join("Versions", "Current", "Resources"));
+  resetSymlink(path.join(stageFrameworkRoot, "Headers"), path.join("Versions", "Current", "Headers"));
+  resetSymlink(
+    path.join(stageFrameworkVersionRoot, "Headers"),
+    path.join("include", `python${getPythonAbiTag(buildPython.version)}`),
+  );
 
   writeFileSync(
     editablePathFile,
