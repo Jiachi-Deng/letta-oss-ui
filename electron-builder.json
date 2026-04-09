@@ -37,6 +37,7 @@
     ],
     "mac": {
         "icon": "templateIcon.png",
+        "timestamp": "none",
         "target": [
             "dmg",
             "zip"
