@@ -832,6 +832,81 @@ git push origin main
 这次已经把 remote 策略整理好了。  
 以后如果不是明确知道自己在做什么，不要随便 force push。
 
+### 坑 9：mac 本地签名可能卡在 timestamp service
+
+这次真实遇到过：
+
+- `electron-builder` 编译都通过了
+- 但 `codesign` 在签内置 Python runtime 时失败
+- 报错是 `The timestamp service is not available.`
+
+处理方式：
+
+- 本地开发打包时，在
+  `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/electron-builder.json`
+  的 `mac` 配置里显式设：
+  - `"timestamp": "none"`
+
+这不是业务代码问题，是 Apple 时间戳服务不可用时的本地打包稳定性问题。  
+如果以后又出现同类报错，先看签名配置，不要先怀疑 Letta 本身逻辑。
+
+### 坑 10：bundled Python.framework 不能带外部 symlink
+
+这次还真实遇到过：
+
+- `codesign` 会先因为 framework 结构不完整失败：
+  - `bundle format unrecognized, invalid, or unsuitable`
+- 修到一半后，最后 `codesign --verify --deep --strict` 又会失败：
+  - `invalid destination for symbolic link in bundle`
+
+根因是：
+
+- Homebrew 里的 `Python.framework` 不是一个可直接分发的完整独立 bundle
+- 直接拷进 app 后，里面会残留指向 `/opt/homebrew/...` 的绝对 symlink
+- 这些链接在开发机上可能“看起来能用”，但打包校验一定会炸
+
+这次的修复已经落在：
+
+- `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/scripts/build-letta-server.mjs`
+
+要点是：
+
+- 补齐 framework 根目录的标准链接：
+  - `Versions/Current`
+  - `Python`
+  - `Headers`
+  - `Resources`
+- 把 `Headers` 改成 bundle 内部的相对链接
+- 把 `libpython3.11.dylib` / `libpython3.11.a` 这些库链接也改成 bundle 内部相对路径
+
+以后如果改了 bundled Python 或 LettaServer 打包逻辑，必须重新检查：
+
+- app 内部不能有指向 `/opt/homebrew/...` 的 symlink
+- 不能有指向 bundle 外部的绝对路径
+- 跑完 `./scripts/build-release.sh` 后，必须再跑 `./scripts/verify-release.sh`
+
+### 坑 11：build 成功后，还要看 release smoke 是否真能对话
+
+这次最终不是只看 `.dmg` / `.zip` 出来就算过。
+
+最终验收链路应该是：
+
+```bash
+cd /Users/jachi/Desktop/letta-workspace
+./scripts/build-release.sh
+./scripts/verify-release.sh
+```
+
+`verify-release.sh` 现在不只是检查文件存在，它还会做：
+
+- bundled Letta server verify
+- bundled Letta server smoke
+- app bundle health check
+- provider 注册
+- 一轮真实 chat smoke
+
+只有这条链完整通过，才算这次 release 真正可交付。
+
 ---
 
 ## 17. 如果你完全不知道从哪开始
