@@ -336,7 +336,22 @@
 
 - 停掉正在运行的 `Letta` / `CodeIsland` / `letta.js`
 - 删除 `/Applications/Letta.app`
-- 删除用户态配置、缓存、Application Support 残留
+- 删除这批核心残留：
+  - `~/Library/Application Support/Letta`
+  - `~/Library/Application Support/Letta Code`
+  - `~/Library/Application Support/letta-cowork`
+  - `~/.letta`
+  - `~/.codeisland`
+  - `~/Documents/.letta`
+- 删除这批更容易漏掉的残留：
+  - `~/Library/Caches/com.codeisland.app`
+  - `~/Library/HTTPStorages/com.codeisland.app`
+  - `~/Library/Preferences/com.codeisland.app.plist`
+  - `~/Library/Preferences/com.jachi.letta.plist`
+  - `~/Library/Saved Application State/com.jachi.letta.savedState`
+  - `~/Library/Saved Application State/com.codeisland.app.savedState`
+  - `~/Library/Logs/Letta`
+  - `~/Library/Logs/CodeIsland`
 - 把最新的 `.dmg` / `.zip` 从
   `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/dist`
   复制到
@@ -345,6 +360,15 @@
 
 它不会自动打开 app，也不会替你走安装流程。  
 它的作用是把当前机器尽量清回“接近首次安装”的状态，并把待测安装包统一放到 `releases/`。
+
+脚本返回 `PASS` 的标准是：
+
+- `/Applications/Letta.app` 不存在
+- 上面列出的 Letta / CodeIsland 残留路径都不存在
+- 没有 `Letta` / `CodeIsland` / `letta.js` 相关运行进程
+- 最新 `.dmg` / `.zip` 已复制到 `releases/`
+
+如果脚本最后返回 `FAIL`，就不要开始手工首装测试。
 
 ---
 
@@ -578,6 +602,7 @@ cd /Users/jachi/Desktop/letta-workspace
 - `/Applications/Letta.app` 已删除
 - `Letta` / `CodeIsland` 相关进程已停止
 - 待测安装包已经在 `releases/`
+- `./scripts/retest-first-install.sh` 最后一行明确返回 `Cleanup complete: PASS`
 
 #### 清单 A：Bundle Smoke
 

@@ -29,6 +29,10 @@ function configureRuntimeIdentity(): void {
 }
 
 function configureLettaCliPathFromSystem(): void {
+  if (app.isPackaged) {
+    return;
+  }
+
   try {
     const whichCmd = process.platform === "win32" ? "where letta" : "which letta";
     const lettaPath = execSync(whichCmd, { encoding: "utf-8" }).trim();
