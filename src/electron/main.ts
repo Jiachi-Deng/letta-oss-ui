@@ -9,6 +9,9 @@ import {
     getBundledLettaServerRuntimeStatus,
 } from "./libs/bundled-letta-server.js";
 import {
+    initializeDiagnosticsPersistence,
+    flushDiagnosticsPersistence,
+    listDiagnosticSummaries,
     getDiagnosticSummary,
     getLatestDiagnosticSummaryForSession,
 } from "./libs/diagnostics.js";
@@ -34,6 +37,7 @@ function cleanup(): void {
     cleanupComplete = true;
 
     globalShortcut.unregisterAll();
+    flushDiagnosticsPersistence();
     stopPolling();
     stopElectronRuntimeServices(codeIslandMonitor);
     codeIslandMonitor = null;
@@ -61,6 +65,7 @@ app.on("ready", () => {
     process.on("SIGINT", handleSignal);
     process.on("SIGHUP", handleSignal);
 
+    initializeDiagnosticsPersistence(app.getPath("userData"));
     const runtimeServices = startElectronRuntimeServices();
     codeIslandMonitor = runtimeServices.codeIslandMonitor;
 
@@ -99,6 +104,10 @@ app.on("ready", () => {
 
     ipcMainHandle("get-diagnostic-summary", (_event, traceId: string) => {
         return getDiagnosticSummary(traceId);
+    });
+
+    ipcMainHandle("list-diagnostic-summaries", () => {
+        return listDiagnosticSummaries();
     });
 
     ipcMainHandle("get-latest-diagnostic-summary-for-session", (_event, sessionId: string) => {

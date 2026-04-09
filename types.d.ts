@@ -7,6 +7,9 @@ type DiagnosticSummary = {
     lastSuccessfulDecisionId?: string;
     firstFailedDecisionId?: string;
     suggestedAction?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    stepCount?: number;
     steps: Array<{
         component: string;
         decisionId?: string;
@@ -16,6 +19,8 @@ type DiagnosticSummary = {
         data?: Record<string, unknown>;
     }>;
 }
+
+type DiagnosticSummaryListItem = Omit<DiagnosticSummary, "steps">;
 
 type Statistics = {
     cpuUsage: number;
@@ -95,6 +100,7 @@ type EventPayloadMapping = {
     "generate-session-title": string;
     "get-recent-cwds": string[];
     "select-directory": string | null;
+    "list-diagnostic-summaries": DiagnosticSummaryListItem[];
     "get-diagnostic-summary": DiagnosticSummary | null;
     "get-latest-diagnostic-summary-for-session": DiagnosticSummary | null;
 }
@@ -108,6 +114,7 @@ interface Window {
         onServerEvent: (callback: (event: any) => void) => UnsubscribeFunction;
         getRecentCwds: (limit?: number) => Promise<string[]>;
         getAppConfig: () => Promise<AppConfigState>;
+        listDiagnosticSummaries: () => Promise<DiagnosticSummaryListItem[]>;
         getDiagnosticSummary: (traceId: string) => Promise<DiagnosticSummary | null>;
         getLatestDiagnosticSummaryForSession: (sessionId: string) => Promise<DiagnosticSummary | null>;
         saveAppConfig: (config: {

@@ -8,10 +8,23 @@ import { useAppStore } from "./store/useAppStore";
 import type { ServerEvent } from "./types";
 
 vi.mock("./components/Sidebar", () => ({
-	Sidebar: ({ onNewSession }: { onNewSession: () => void }) => (
-		<button onClick={onNewSession} type="button">
-			New Task
-		</button>
+	Sidebar: ({
+		onNewSession,
+		onOpenDiagnostics,
+		activeView,
+	}: {
+		onNewSession: () => void;
+		onOpenDiagnostics: () => void;
+		activeView: "chat" | "diagnostics";
+	}) => (
+		<div>
+			<button onClick={onNewSession} type="button">
+				New Task
+			</button>
+			<button onClick={onOpenDiagnostics} type="button">
+				{activeView === "diagnostics" ? "Diagnostics Active" : "Diagnostics"}
+			</button>
+		</div>
 	),
 }));
 
@@ -45,6 +58,7 @@ describe("App", () => {
 	let serverEventHandler: ((event: ServerEvent) => void) | null;
 	let sendClientEventMock: ReturnType<typeof vi.fn>;
 	let getStaticDataMock: ReturnType<typeof vi.fn>;
+	let listDiagnosticSummariesMock: ReturnType<typeof vi.fn>;
 	let getDiagnosticSummaryMock: ReturnType<typeof vi.fn>;
 	let getLatestDiagnosticSummaryForSessionMock: ReturnType<typeof vi.fn>;
 
@@ -54,6 +68,7 @@ describe("App", () => {
 		sendClientEventMock = vi.fn();
 		getDiagnosticSummaryMock = vi.fn().mockResolvedValue(null);
 		getLatestDiagnosticSummaryForSessionMock = vi.fn().mockResolvedValue(null);
+		listDiagnosticSummariesMock = vi.fn().mockResolvedValue([]);
 		getStaticDataMock = vi.fn().mockResolvedValue({
 			totalStorage: 512,
 			cpuModel: "Apple M3",
@@ -79,6 +94,7 @@ describe("App", () => {
 					requiresOnboarding: false,
 				}),
 				getStaticData: getStaticDataMock,
+				listDiagnosticSummaries: listDiagnosticSummariesMock,
 				getDiagnosticSummary: getDiagnosticSummaryMock,
 				getLatestDiagnosticSummaryForSession: getLatestDiagnosticSummaryForSessionMock,
 				getRecentCwds: vi.fn().mockResolvedValue([]),
@@ -408,5 +424,66 @@ describe("App", () => {
 		expect(
 			screen.getByPlaceholderText("Describe what you want agent to handle..."),
 		).toBeEnabled();
+	});
+
+	it("opens the diagnostics view and renders persisted trace details", async () => {
+		const user = userEvent.setup();
+		listDiagnosticSummariesMock.mockResolvedValue([
+			{
+				traceId: "trc_diag_1",
+				turnId: "turn_diag_1",
+				sessionId: "conv_diag_1",
+				summary: "Trace failed at BOOT_CONN_002 after RUNNER_INIT_001.",
+				errorCode: "E_PROVIDER_CONNECT_FAILED",
+				lastSuccessfulDecisionId: "RUNNER_INIT_001",
+				firstFailedDecisionId: "BOOT_CONN_002",
+				suggestedAction: "Inspect the provider base URL, API key, and letta connect CLI stderr for the failed registration step.",
+				createdAt: "2026-04-09T18:00:00.000Z",
+				updatedAt: "2026-04-09T18:01:00.000Z",
+				stepCount: 2,
+			},
+		]);
+		getDiagnosticSummaryMock.mockResolvedValue({
+			traceId: "trc_diag_1",
+			turnId: "turn_diag_1",
+			sessionId: "conv_diag_1",
+			summary: "Trace failed at BOOT_CONN_002 after RUNNER_INIT_001.",
+			errorCode: "E_PROVIDER_CONNECT_FAILED",
+			lastSuccessfulDecisionId: "RUNNER_INIT_001",
+			firstFailedDecisionId: "BOOT_CONN_002",
+			suggestedAction: "Inspect the provider base URL, API key, and letta connect CLI stderr for the failed registration step.",
+			createdAt: "2026-04-09T18:00:00.000Z",
+			updatedAt: "2026-04-09T18:01:00.000Z",
+			stepCount: 2,
+			steps: [
+				{
+					component: "runner",
+					decisionId: "RUNNER_INIT_001",
+					status: "ok",
+					message: "runtime connection ready",
+				},
+				{
+					component: "provider-bootstrap",
+					decisionId: "BOOT_CONN_002",
+					status: "error",
+					message: "runtime connection bootstrap failed during compatible provider registration",
+					errorCode: "E_PROVIDER_CONNECT_FAILED",
+				},
+			],
+		});
+
+		render(<App />);
+		await waitFor(() => {
+			expect(sendClientEventMock).toHaveBeenCalledWith({ type: "session.list" });
+		});
+
+		await user.click(screen.getByRole("button", { name: "Diagnostics" }));
+
+		expect(await screen.findByRole("heading", { level: 2, name: "Trace failed at BOOT_CONN_002 after RUNNER_INIT_001." })).toBeInTheDocument();
+		expect(screen.getAllByText("RUNNER_INIT_001").length).toBeGreaterThanOrEqual(2);
+		expect(screen.getByRole("button", { name: "Copy diagnostics" })).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Copy diagnostics" }));
+		await expect(navigator.clipboard.readText()).resolves.toContain("Trace ID: trc_diag_1");
+		expect(getDiagnosticSummaryMock).toHaveBeenCalledWith("trc_diag_1");
 	});
 });

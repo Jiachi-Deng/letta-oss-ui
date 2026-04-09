@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { getDiagnosticSummary, resetDiagnosticsForTests } from "./diagnostics.js";
 import {
   createComponentLogger,
   createTraceContext,
@@ -8,6 +9,11 @@ import {
 } from "./trace.js";
 
 describe("trace foundation", () => {
+  afterEach(() => {
+    resetDiagnosticsForTests();
+    vi.restoreAllMocks();
+  });
+
   it("creates prefixed trace and turn ids", () => {
     expect(createTraceId()).toMatch(/^trc_[0-9a-f]{32}$/);
     expect(createTurnId()).toMatch(/^turn_[0-9a-f]{32}$/);
@@ -73,5 +79,35 @@ describe("trace foundation", () => {
         error_code: "E_SESSION_CONVERSATION_ID_MISSING",
       }),
     );
+  });
+
+  it("keeps the default sink silent in tests while observers still record diagnostics", () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "test";
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      emitStructuredLog({
+        level: "info",
+        component: "runner",
+        trace_id: "trc_silent",
+        turn_id: "turn_silent",
+        session_id: "conv_silent",
+        message: "default sink should not print in tests",
+      });
+
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(getDiagnosticSummary("trc_silent")).toMatchObject({
+        traceId: "trc_silent",
+        sessionId: "conv_silent",
+      });
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
   });
 });

@@ -28,6 +28,30 @@ export type SDKStreamEventMessage = AppStreamEventMessage;
 export type StreamMessage = AppMessage;
 export type { UserPromptMessage, CanUseToolResponse };
 
+export type DiagnosticSummary = {
+  traceId: string;
+  turnId?: string;
+  sessionId?: string;
+  summary: string;
+  errorCode?: string;
+  lastSuccessfulDecisionId?: string;
+  firstFailedDecisionId?: string;
+  suggestedAction?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  stepCount?: number;
+  steps: Array<{
+    component: string;
+    decisionId?: string;
+    status: "ok" | "warning" | "error";
+    message: string;
+    errorCode?: string;
+    data?: Record<string, unknown>;
+  }>;
+};
+
+export type DiagnosticSummaryListItem = Omit<DiagnosticSummary, "steps">;
+
 export type SessionStatus = "idle" | "running" | "completed" | "error";
 
 export type SessionInfo = {

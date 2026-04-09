@@ -28,6 +28,8 @@ electron.contextBridge.exposeInMainWorld("electron", {
         ipcInvoke("get-recent-cwds", limit),
     getAppConfig: () =>
         ipcInvoke("get-app-config"),
+    listDiagnosticSummaries: () =>
+        ipcInvoke("list-diagnostic-summaries"),
     getDiagnosticSummary: (traceId: string) =>
         ipcInvoke("get-diagnostic-summary", traceId),
     getLatestDiagnosticSummaryForSession: (sessionId: string) =>

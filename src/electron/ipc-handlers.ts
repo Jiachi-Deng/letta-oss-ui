@@ -28,9 +28,26 @@ import {
   type TraceContext,
 } from "./libs/trace.js";
 import {
+  PERMISSION_RESPONSE_001,
+  PERMISSION_RESPONSE_002,
+  PERMISSION_RESPONSE_003,
   IPC_CONTINUE_001,
   IPC_START_001,
+  SESSION_DELETE_001,
+  SESSION_DELETE_002,
+  SESSION_DELETE_003,
+  SESSION_HISTORY_001,
+  SESSION_HISTORY_002,
+  SESSION_HISTORY_003,
+  SESSION_STOP_001,
+  SESSION_STOP_002,
+  SESSION_STOP_003,
 } from "../shared/decision-ids.js";
+import {
+  E_HISTORY_LOAD_FAILED,
+  E_PERMISSION_RESPONSE_MISSING,
+  E_SESSION_STOP_FAILED,
+} from "../shared/error-codes.js";
 
 const DEBUG = process.env.DEBUG_IPC === "true";
 const ipcLog = createComponentLogger("ipc");
@@ -49,6 +66,13 @@ const log = (
     session_id: context?.sessionId,
   });
 };
+
+function createSessionTraceContext(conversationId: string): TraceContext {
+  return createTraceContext({
+    turnId: createTurnId(),
+    sessionId: conversationId,
+  });
+}
 
 // Debug-only logging (verbose)
 const debug = (
@@ -133,15 +157,65 @@ export async function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "session.history") {
     const conversationId = event.payload.sessionId;
-    const session = getSessionProjection(conversationId);
-    emit({
-      type: "session.history",
-      payload: {
-        sessionId: conversationId,
-        status: session?.status ?? "idle",
-        messages: getSessionProjectionHistory(conversationId),
-      },
+    const traceContext = createSessionTraceContext(conversationId);
+
+    ipcLog({
+      level: "info",
+      message: "session.history: boundary entered",
+      decision_id: SESSION_HISTORY_001,
+      trace_id: traceContext.traceId,
+      turn_id: traceContext.turnId,
+      session_id: traceContext.sessionId,
+      data: { sessionId: conversationId },
     });
+
+    try {
+      const session = getSessionProjection(conversationId);
+      const messages = getSessionProjectionHistory(conversationId);
+
+      ipcLog({
+        level: "info",
+        message: "session.history: history loaded",
+        decision_id: SESSION_HISTORY_002,
+        trace_id: traceContext.traceId,
+        turn_id: traceContext.turnId,
+        session_id: traceContext.sessionId,
+        data: {
+          sessionStatus: session?.status ?? "idle",
+          messageCount: messages.length,
+        },
+      });
+
+      emit({
+        type: "session.history",
+        payload: {
+          sessionId: conversationId,
+          status: session?.status ?? "idle",
+          messages,
+        },
+      });
+    } catch (error) {
+      ipcLog({
+        level: "error",
+        message: "session.history: failed to load history",
+        decision_id: SESSION_HISTORY_003,
+        error_code: E_HISTORY_LOAD_FAILED,
+        trace_id: traceContext.traceId,
+        turn_id: traceContext.turnId,
+        session_id: traceContext.sessionId,
+        data: {
+          error: String(error),
+        },
+      });
+      emit({
+        type: "runner.error",
+        payload: {
+          sessionId: conversationId,
+          traceId: traceContext.traceId,
+          message: String(error),
+        },
+      });
+    }
     return;
   }
 
@@ -378,18 +452,44 @@ export async function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "session.stop") {
     const conversationId = event.payload.sessionId;
-    debug("session.stop: stopping session", { conversationId });
+    const traceContext = createSessionTraceContext(conversationId);
+
+    ipcLog({
+      level: "info",
+      message: "session.stop: boundary entered",
+      decision_id: SESSION_STOP_001,
+      trace_id: traceContext.traceId,
+      turn_id: traceContext.turnId,
+      session_id: traceContext.sessionId,
+      data: { conversationId },
+    });
+
     finishCodeIslandObservation(conversationId, { reason: "user", success: false });
     const handle = runnerHandles.get(conversationId);
+    let stopError: unknown;
+    let stopCompleted = false;
     if (handle) {
-      debug("session.stop: aborting handle");
       try {
         await handle.abort();
+        stopCompleted = true;
+      } catch (error) {
+        stopError = error;
+        ipcLog({
+          level: "error",
+          message: "session.stop: abort failed",
+          decision_id: SESSION_STOP_003,
+          error_code: E_SESSION_STOP_FAILED,
+          trace_id: traceContext.traceId,
+          turn_id: traceContext.turnId,
+          session_id: traceContext.sessionId,
+          data: {
+            conversationId,
+            error: String(error),
+          },
+        });
       } finally {
         releaseRunnerHandle(conversationId);
       }
-    } else {
-      debug("session.stop: no handle found");
     }
     discardReusableConversationSession(conversationId);
     updateSessionProjection(conversationId, { status: "idle" });
@@ -397,19 +497,95 @@ export async function handleClientEvent(event: ClientEvent) {
       type: "session.status",
       payload: { sessionId: conversationId, status: "idle" },
     });
+
+    if (!handle) {
+      ipcLog({
+        level: "warn",
+        message: "session.stop: no active runner handle found",
+        decision_id: SESSION_STOP_002,
+        trace_id: traceContext.traceId,
+        turn_id: traceContext.turnId,
+        session_id: traceContext.sessionId,
+        data: { conversationId },
+      });
+    }
+
+    if (stopError) {
+      log("session.stop: handled abort error and completed cleanup", {
+        conversationId,
+        error: String(stopError),
+      }, traceContext);
+    }
+
+    if (stopCompleted) {
+      ipcLog({
+        level: "info",
+        message: "session.stop: abort completed",
+        decision_id: SESSION_STOP_002,
+        trace_id: traceContext.traceId,
+        turn_id: traceContext.turnId,
+        session_id: traceContext.sessionId,
+        data: { conversationId },
+      });
+    }
     return;
   }
 
   if (event.type === "session.delete") {
     const conversationId = event.payload.sessionId;
+    const traceContext = createSessionTraceContext(conversationId);
+
+    ipcLog({
+      level: "info",
+      message: "session.delete: boundary entered",
+      decision_id: SESSION_DELETE_001,
+      trace_id: traceContext.traceId,
+      turn_id: traceContext.turnId,
+      session_id: traceContext.sessionId,
+      data: { conversationId },
+    });
+
     finishCodeIslandObservation(conversationId, { reason: "user", success: false });
     const handle = runnerHandles.get(conversationId);
     if (handle) {
       try {
         await handle.abort();
+        ipcLog({
+          level: "info",
+          message: "session.delete: abort completed",
+          decision_id: SESSION_DELETE_002,
+          trace_id: traceContext.traceId,
+          turn_id: traceContext.turnId,
+          session_id: traceContext.sessionId,
+          data: { conversationId },
+        });
+      } catch (error) {
+        ipcLog({
+          level: "error",
+          message: "session.delete: abort failed",
+          decision_id: SESSION_DELETE_003,
+          error_code: E_SESSION_STOP_FAILED,
+          trace_id: traceContext.traceId,
+          turn_id: traceContext.turnId,
+          session_id: traceContext.sessionId,
+          data: {
+            conversationId,
+            error: String(error),
+          },
+        });
       } finally {
         releaseRunnerHandle(conversationId);
       }
+    } else {
+      ipcLog({
+        level: "warn",
+        message: "session.delete: no active runner handle found",
+        decision_id: SESSION_DELETE_002,
+        trace_id: traceContext.traceId,
+        turn_id: traceContext.turnId,
+        session_id: traceContext.sessionId,
+        data: { conversationId },
+      });
     }
     deleteSessionProjection(conversationId);
     clearCodeIslandObservation(conversationId);
@@ -424,12 +600,81 @@ export async function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "permission.response") {
     const session = getSessionProjection(event.payload.sessionId);
-    if (!session) return;
+    const traceContext = createSessionTraceContext(event.payload.sessionId);
+
+    ipcLog({
+      level: "info",
+      message: "permission.response: received",
+      decision_id: PERMISSION_RESPONSE_001,
+      trace_id: traceContext.traceId,
+      turn_id: traceContext.turnId,
+      session_id: traceContext.sessionId,
+      data: {
+        toolUseId: event.payload.toolUseId,
+      },
+    });
+
+    if (!session) {
+      ipcLog({
+        level: "warn",
+        message: "permission.response: session missing",
+        decision_id: PERMISSION_RESPONSE_003,
+        error_code: E_PERMISSION_RESPONSE_MISSING,
+        trace_id: traceContext.traceId,
+        turn_id: traceContext.turnId,
+        session_id: traceContext.sessionId,
+        data: {
+          toolUseId: event.payload.toolUseId,
+        },
+      });
+      emit({
+        type: "runner.error",
+        payload: {
+          sessionId: event.payload.sessionId,
+          traceId: traceContext.traceId,
+          message: "Permission response received without an active session.",
+        },
+      });
+      return;
+    }
 
     const pending = session.pendingPermissions.get(event.payload.toolUseId);
     if (pending) {
+      ipcLog({
+        level: "info",
+        message: "permission.response: applied",
+        decision_id: PERMISSION_RESPONSE_002,
+        trace_id: traceContext.traceId,
+        turn_id: traceContext.turnId,
+        session_id: traceContext.sessionId,
+        data: {
+          toolUseId: event.payload.toolUseId,
+        },
+      });
       pending.resolve(event.payload.result);
+      return;
     }
+
+    ipcLog({
+      level: "warn",
+      message: "permission.response: pending request missing",
+      decision_id: PERMISSION_RESPONSE_003,
+      error_code: E_PERMISSION_RESPONSE_MISSING,
+      trace_id: traceContext.traceId,
+      turn_id: traceContext.turnId,
+      session_id: traceContext.sessionId,
+      data: {
+        toolUseId: event.payload.toolUseId,
+      },
+    });
+    emit({
+      type: "runner.error",
+      payload: {
+        sessionId: event.payload.sessionId,
+        traceId: traceContext.traceId,
+        message: "Permission response did not match an active pending request.",
+      },
+    });
     return;
   }
 }

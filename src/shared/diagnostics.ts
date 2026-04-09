@@ -21,5 +21,10 @@ export type DiagnosticSummary = {
   lastSuccessfulDecisionId?: DecisionId;
   firstFailedDecisionId?: DecisionId;
   suggestedAction?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  stepCount?: number;
   steps: DiagnosticStep[];
 };
+
+export type DiagnosticSummaryListItem = Omit<DiagnosticSummary, "steps">;

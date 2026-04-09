@@ -242,6 +242,7 @@
 - `current-state.md`
 - `migration-status.md`
 - `repo-ownership.md`
+- `testing-guide.md`
 - `update-playbook.md`
 - `workspace-map.md`
 
@@ -1173,7 +1174,13 @@ cd /Users/jachi/Desktop/letta-workspace
 
 - 关键链路会生成 `traceId`
 - 主进程会把结构化日志聚合成 compact diagnostics summary
+- 诊断摘要会落盘到本机 app 数据目录，重启后会恢复最近的 traces
 - 当 UI 里出现可诊断的 warning / error banner 时，会显示 `Copy diagnostics`
+- 左侧栏现在还有一个独立的 `Diagnostics` 页面，可以直接查看最近 traces 列表、summary 和 steps
+- `Diagnostics` 页面支持按 `errorCode` 过滤，也支持搜索 `traceId / sessionId`
+- 页面里有两个不同用途的按钮：
+  - `Copy diagnostics`：复制 compact summary，适合日常快速排障
+  - `Copy full trace`：复制完整 trace，包含 summary、steps 和关键 metadata，适合追查复杂失败
 
 当前这颗按钮主要会出现在：
 
@@ -1195,10 +1202,32 @@ cd /Users/jachi/Desktop/letta-workspace
 测试时如果你看到异常，不需要再手工长篇描述。
 优先点一次 `Copy diagnostics`，把那段文本直接发给模型，就能明显减少排障时重新全仓扫描的成本。
 
+如果你已经在 `Diagnostics` 页面里筛到了一条复杂 trace，而且它的 steps 里出现了多个 decision、多个子进程边界、或者你怀疑是 metadata / stream / permission 组合问题，就改点 `Copy full trace`。
+
+它会把 compact summary 之外的 step data 和关键 metadata 一起带上，更适合让模型做二次定位。
+
+如果你想看历史记录，直接点左侧栏的 `Diagnostics`，然后：
+
+1. 先用 `errorCode` 过滤，快速缩小范围
+2. 必要时再用 `traceId / sessionId` 搜索具体链路
+3. 选择最近的 trace
+4. 看 summary / steps / suggested action
+5. 日常排障先点 `Copy diagnostics`
+6. 遇到复杂多步问题、子进程边界问题、或者需要给模型复盘完整链路时，再点 `Copy full trace`
+
+### 测试日志
+
+在测试环境下，默认的结构化日志 sink 会静音，但仍然会继续喂给 diagnostics observer。
+这意味着：
+
+- tests 不会被无关的 JSON 日志刷屏
+- diagnostics 聚合和持久化测试仍然有效
+- 自定义 `setTraceSink()` / `resetTraceSink()` 的语义不变
+
 ### 当前限制
 
 这套 `v1` 仍然有边界：
 
-- diagnostics 目前是内存态，应用重启后不会保留
-- 现在只接入了最关键的两个 banner，还没有单独 diagnostics 页面
-- 测试输出里仍会看到结构化日志打印，这不影响功能，但后面可以继续收敛
+- diagnostics 仍然是轻量级本地 JSON 存储，不是单独数据库
+- 现在只接入了最关键的两个 banner，独立页面也只是基础版列表 + 详情
+- 测试输出的静音只针对默认 sink，真正的自定义 trace sink 仍然可以输出

@@ -8,12 +8,16 @@ interface SidebarProps {
   onNewSession: () => void;
   onDeleteSession: (sessionId: string) => void;
   onOpenSettings: () => void;
+  onOpenDiagnostics: () => void;
+  activeView: "chat" | "diagnostics";
 }
 
 export function Sidebar({
   onNewSession,
   onDeleteSession,
   onOpenSettings,
+  onOpenDiagnostics,
+  activeView,
 }: SidebarProps) {
   const sessions = useAppStore((state) => state.sessions);
   const activeSessionId = useAppStore((state) => state.activeSessionId);
@@ -139,6 +143,24 @@ export function Sidebar({
         ))}
       </div>
       <div className="border-t border-ink-900/5 pt-3">
+        <button
+          className={`mb-2 flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm transition-colors ${
+            activeView === "diagnostics"
+              ? "border-accent/30 bg-accent-subtle text-ink-800"
+              : "border-ink-900/10 bg-surface text-ink-700 hover:bg-surface-tertiary hover:border-ink-900/20"
+          }`}
+          onClick={onOpenDiagnostics}
+        >
+          <span className="flex items-center gap-2">
+            <svg viewBox="0 0 24 24" className="h-4 w-4 text-ink-500" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M4 19h16M7 15V9m5 6V5m5 10v-4" />
+            </svg>
+            <span>Diagnostics</span>
+          </span>
+          <svg viewBox="0 0 24 24" className="h-4 w-4 text-ink-400" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
         <button
           className="flex w-full items-center justify-between rounded-xl border border-ink-900/10 bg-surface px-3 py-2.5 text-left text-sm text-ink-700 transition-colors hover:bg-surface-tertiary hover:border-ink-900/20"
           onClick={onOpenSettings}

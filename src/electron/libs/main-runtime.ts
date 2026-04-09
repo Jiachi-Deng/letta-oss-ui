@@ -12,7 +12,7 @@ import {
   type CodeIslandMonitorHandle,
 } from "./bundled-codeisland.js";
 import { initializeAppConfig } from "./config.js";
-import { createTraceContext, createTurnId } from "./trace.js";
+import { createComponentLogger, createTraceContext, createTurnId } from "./trace.js";
 
 const PRODUCT_NAME = "Letta";
 const APP_ID = "com.jachi.letta";
@@ -20,6 +20,8 @@ const APP_ID = "com.jachi.letta";
 export type ElectronRuntimeServices = {
   codeIslandMonitor: CodeIslandMonitorHandle | null;
 };
+
+const runtimeLog = createComponentLogger("main-runtime");
 
 function configureRuntimeIdentity(): void {
   app.setName(PRODUCT_NAME);
@@ -81,14 +83,41 @@ export function stopElectronRuntimeServices(codeIslandMonitor: CodeIslandMonitor
 }
 
 export function startElectronRuntimeServices(): ElectronRuntimeServices {
-  void ensureBundledLettaServerStarted()
+  const serverTrace = createTraceContext({ turnId: createTurnId() });
+
+  runtimeLog({
+    level: "info",
+    message: "bundled server startup requested",
+    trace_id: serverTrace.traceId,
+    turn_id: serverTrace.turnId,
+  });
+
+  void ensureBundledLettaServerStarted(serverTrace)
     .then((startup) => {
       if (startup.status !== "unsupported") {
-        console.log(`[letta-server] Startup status: ${startup.status}`);
+        runtimeLog({
+          level: "info",
+          message: "bundled server startup resolved",
+          trace_id: serverTrace.traceId,
+          turn_id: serverTrace.turnId,
+          data: {
+            status: startup.status,
+            resolutionSource: startup.resolution?.source,
+            baseUrl: startup.resolution?.baseUrl,
+          },
+        });
       }
     })
     .catch((error) => {
-      console.error("[letta-server] Failed to start bundled server:", error);
+      runtimeLog({
+        level: "error",
+        message: "bundled server startup failed",
+        trace_id: serverTrace.traceId,
+        turn_id: serverTrace.turnId,
+        data: {
+          error: String(error),
+        },
+      });
     });
 
   const codeIslandTrace = createTraceContext({ turnId: createTurnId() });

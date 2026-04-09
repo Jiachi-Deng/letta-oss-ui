@@ -29,13 +29,15 @@ import {
 } from "./conversation-session-cache.js";
 import {
   E_SESSION_CONVERSATION_ID_MISSING,
-  E_STREAM_NO_ASSISTANT_OUTPUT,
+  E_STREAM_EMPTY_RESULT,
 } from "../../shared/error-codes.js";
 import {
   RUNNER_INIT_001,
   RUNNER_INIT_002,
+  PERMISSION_REQUEST_001,
   STREAM_001,
   STREAM_002,
+  STREAM_EMPTY_RESULT_001,
 } from "../../shared/decision-ids.js";
 import {
   createComponentLogger,
@@ -143,6 +145,18 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
   };
 
   const sendPermissionRequest = (toolUseId: string, toolName: string, input: unknown) => {
+    runnerLog({
+      level: "info",
+      message: "permission request emitted",
+      decision_id: PERMISSION_REQUEST_001,
+      trace_id: traceContext.traceId,
+      turn_id: traceContext.turnId,
+      session_id: traceContext.sessionId,
+      data: {
+        toolUseId,
+        toolName,
+      },
+    });
     onEvent({
       type: "permission.request",
       payload: { sessionId: currentSessionId, toolUseId, toolName, input }
@@ -367,11 +381,16 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
           debug("result received", { success: message.success, status });
           runnerLog({
             level: message.success && !assistantOutputSeen ? "warn" : message.success ? "info" : "warn",
-            message: "stream result received",
-            decision_id: STREAM_002,
+            message: message.success && !assistantOutputSeen
+              ? "stream result completed without assistant output"
+              : "stream result received",
+            decision_id:
+              message.success && !assistantOutputSeen
+                ? STREAM_EMPTY_RESULT_001
+                : STREAM_002,
             error_code:
               message.success && !assistantOutputSeen
-                ? E_STREAM_NO_ASSISTANT_OUTPUT
+                ? E_STREAM_EMPTY_RESULT
                 : undefined,
             trace_id: traceContext.traceId,
             turn_id: traceContext.turnId,
@@ -397,9 +416,11 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
         debug("query completed normally");
         runnerLog({
           level: assistantOutputSeen ? "info" : "warn",
-          message: "stream completed without explicit result message",
-          decision_id: STREAM_002,
-          error_code: assistantOutputSeen ? undefined : E_STREAM_NO_ASSISTANT_OUTPUT,
+          message: assistantOutputSeen
+            ? "stream completed without explicit result message"
+            : "stream completed without assistant output",
+          decision_id: assistantOutputSeen ? STREAM_002 : STREAM_EMPTY_RESULT_001,
+          error_code: assistantOutputSeen ? undefined : E_STREAM_EMPTY_RESULT,
           trace_id: traceContext.traceId,
           turn_id: traceContext.turnId,
           session_id: traceContext.sessionId,

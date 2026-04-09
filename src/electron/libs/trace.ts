@@ -9,6 +9,7 @@ export type TraceComponent =
   | "ipc"
   | "runner"
   | "provider-bootstrap"
+  | "letta-code-cli"
   | "bundled-codeisland"
   | "bundled-letta-server"
   | "main-runtime"
@@ -71,6 +72,14 @@ export function extendTraceContext(
 }
 
 export function defaultTraceSink(event: StructuredLogEvent): void {
+  if (
+    process.env.NODE_ENV === "test"
+    || process.env.VITEST === "true"
+    || process.env.VITEST === "1"
+  ) {
+    return;
+  }
+
   const payload = JSON.stringify(event);
   if (event.level === "error") {
     console.error(payload);

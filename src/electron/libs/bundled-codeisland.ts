@@ -5,6 +5,8 @@ import electron from "electron";
 import {
   E_CODEISLAND_BUNDLE_MISSING,
   E_CODEISLAND_LAUNCH_BLOCKED,
+  E_CODEISLAND_LAUNCH_COMMAND_FAILED,
+  E_CODEISLAND_MONITOR_RESTART_FAILED,
   E_CODEISLAND_OS_UNSUPPORTED,
 } from "../../shared/error-codes.js";
 import {
@@ -12,6 +14,13 @@ import {
   CI_BOOT_002,
   CI_BOOT_003,
   CI_BOOT_004,
+  CI_LAUNCH_001,
+  CI_LAUNCH_002,
+  CI_LAUNCH_003,
+  CI_MONITOR_001,
+  CI_MONITOR_002,
+  CI_MONITOR_003,
+  CI_MONITOR_004,
 } from "../../shared/decision-ids.js";
 import {
   createComponentLogger,
@@ -26,6 +35,7 @@ const CODEISLAND_LAUNCH_VERIFY_DELAY_MS = 1200;
 const CODEISLAND_MINIMUM_MACOS_MAJOR = 14;
 const { app } = electron;
 const codeIslandLog = createComponentLogger("bundled-codeisland");
+const CODEISLAND_OUTPUT_PREVIEW_LIMIT = 200;
 
 type CodeIslandResolutionSource = "bundled" | "dev-build" | "applications";
 type CodeIslandStartupStatus =
@@ -164,6 +174,17 @@ function buildUnsupportedDiagnostic(context: CodeIslandRuntimeContext): CodeIsla
 
 function getLaunchFailureAction(appPath: string): string {
   return `Open "${appPath}" once in Finder or run 'open "${appPath}"', approve any macOS security prompt in System Settings > Privacy & Security, then relaunch Letta.`;
+}
+
+function summarizeCommandOutput(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.length > CODEISLAND_OUTPUT_PREVIEW_LIMIT
+    ? `${normalized.slice(0, CODEISLAND_OUTPUT_PREVIEW_LIMIT)}…`
+    : normalized;
 }
 
 function readQuarantineState(appPath: string): string | null {
@@ -496,11 +517,47 @@ export function ensureCodeIslandStarted(
     data: {
       appPath: resolution.appPath,
       source: resolution.source,
+      },
+  });
+  logCodeIslandEvent(observability.trace, {
+    level: "info",
+    message: "CodeIsland launch command started",
+    decision_id: CI_LAUNCH_001,
+    data: {
+      appPath: resolution.appPath,
+      source: resolution.source,
+      command: "open",
     },
   });
   const launchResult = spawnSync("open", [resolution.appPath], {
     encoding: "utf8",
     stdio: "pipe",
+  });
+
+  const launchSummary = {
+    appPath: resolution.appPath,
+    source: resolution.source,
+    command: "open",
+    status: launchResult.status,
+    signal: launchResult.signal ?? undefined,
+    stdoutLength: launchResult.stdout?.length ?? 0,
+    stderrLength: launchResult.stderr?.length ?? 0,
+    stdoutPreview: launchResult.stdout?.trim()
+      ? summarizeCommandOutput(launchResult.stdout)
+      : undefined,
+    stderrPreview: launchResult.stderr?.trim()
+      ? summarizeCommandOutput(launchResult.stderr)
+      : undefined,
+  };
+
+  logCodeIslandEvent(observability.trace, {
+    level: "info",
+    message: "CodeIsland launch command completed",
+    decision_id: CI_LAUNCH_002,
+    data: {
+      ...launchSummary,
+      error: launchResult.error?.message,
+    },
   });
 
   const launchError = launchResult.error?.message
@@ -512,11 +569,10 @@ export function ensureCodeIslandStarted(
     logCodeIslandEvent(observability.trace, {
       level: "error",
       message: "CodeIsland launch command failed",
-      decision_id: CI_BOOT_003,
-      error_code: E_CODEISLAND_LAUNCH_BLOCKED,
+      decision_id: CI_LAUNCH_003,
+      error_code: E_CODEISLAND_LAUNCH_COMMAND_FAILED,
       data: {
-        appPath: resolution.appPath,
-        source: resolution.source,
+        ...launchSummary,
         error: launchError,
       },
     });
@@ -618,10 +674,38 @@ export function startCodeIslandMonitor(
       return;
     }
 
+    logCodeIslandEvent(observability.trace, {
+      level: "warn",
+      message: "CodeIsland monitor observed companion not running",
+      decision_id: CI_MONITOR_001,
+      data: {
+        appPath: resolution.appPath,
+        source: resolution.source,
+      },
+    });
     console.warn(`[codeisland] CodeIsland is not running. Restarting ${resolution.appPath}`);
+    logCodeIslandEvent(observability.trace, {
+      level: "info",
+      message: "CodeIsland monitor attempting restart",
+      decision_id: CI_MONITOR_002,
+      data: {
+        appPath: resolution.appPath,
+        source: resolution.source,
+      },
+    });
     const restartResult = ensureCodeIslandStarted(context, observability);
 
     if (restartResult.status === "launched" || restartResult.status === "already-running") {
+      logCodeIslandEvent(observability.trace, {
+        level: "info",
+        message: "CodeIsland monitor restart succeeded",
+        decision_id: CI_MONITOR_003,
+        data: {
+          appPath: resolution.appPath,
+          source: resolution.source,
+          restartStatus: restartResult.status,
+        },
+      });
       setLatestRuntimeStatus({
         platformSupported: true,
         available: true,
@@ -636,6 +720,16 @@ export function startCodeIslandMonitor(
     }
 
     if (restartResult.status === "failed") {
+      logCodeIslandEvent(observability.trace, {
+        level: "error",
+        message: "CodeIsland monitor restart failed",
+        decision_id: CI_MONITOR_004,
+        error_code: E_CODEISLAND_MONITOR_RESTART_FAILED,
+        data: {
+          appPath: resolution.appPath,
+          source: resolution.source,
+        },
+      });
       console.warn(`[codeisland] Failed to restart ${resolution.appPath}`);
     }
   }, CODEISLAND_MONITOR_INTERVAL_MS);

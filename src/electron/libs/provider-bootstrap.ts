@@ -9,11 +9,19 @@ import { getCompatibleLettaServerUrl } from "./config.js";
 import { waitForBundledLettaServerReady } from "./bundled-letta-server.js";
 import {
   E_LETTA_CLI_GLOBAL_SHADOWED,
+  E_LETTA_CLI_EXIT_NON_ZERO,
+  E_LETTA_CLI_SPAWN_FAILED,
   E_PROVIDER_CONNECT_FAILED,
 } from "../../shared/error-codes.js";
 import {
   BOOT_CONN_001,
   BOOT_CONN_002,
+  CLI_CONNECT_001,
+  CLI_CONNECT_002,
+  CLI_CONNECT_003,
+  CLI_CONNECT_004,
+  CLI_CONNECT_005,
+  CLI_CONNECT_006,
 } from "../../shared/decision-ids.js";
 import {
   createComponentLogger,
@@ -58,6 +66,8 @@ const LOCAL_SERVER_API_KEY = "local-dev-key";
 const require = createRequire(import.meta.url);
 const compatibleProviderCache = new Map<string, Promise<CompatibleProviderConfig>>();
 const providerLog = createComponentLogger("provider-bootstrap");
+const cliLog = createComponentLogger("letta-code-cli");
+const CLI_OUTPUT_PREVIEW_LIMIT = 200;
 
 function normalizeString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -66,6 +76,16 @@ function normalizeString(value: string | undefined): string | undefined {
 
 function normalizeUrl(url: string): string {
   return url.replace(/\/+$/, "");
+}
+
+function summarizeCliOutput(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  return normalized.length > CLI_OUTPUT_PREVIEW_LIMIT
+    ? `${normalized.slice(0, CLI_OUTPUT_PREVIEW_LIMIT)}…`
+    : normalized;
 }
 
 function normalizeModelName(model: string): string {
@@ -194,6 +214,27 @@ async function runLettaCli(
   const command = useElectronRuntime ? process.execPath : "node";
 
   await new Promise<void>((resolvePromise, rejectPromise) => {
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+    let stdoutObserved = false;
+    let stderrObserved = false;
+
+    cliLog({
+      level: "info",
+      message: "letta-code CLI spawn started",
+      decision_id: CLI_CONNECT_001,
+      trace_id: trace?.traceId,
+      turn_id: trace?.turnId,
+      session_id: trace?.sessionId,
+      data: {
+        cliPath,
+        command,
+        argumentCount: args.length,
+        electronRuntime: useElectronRuntime,
+      },
+    });
+
     const child = spawn(command, [cliPath, ...args], {
       cwd: process.cwd(),
       env: {
@@ -204,26 +245,109 @@ async function runLettaCli(
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+    child.stdout?.on("data", (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      if (!stdoutObserved && text.trim()) {
+        stdoutObserved = true;
+        cliLog({
+          level: "info",
+          message: "letta-code CLI stdout observed",
+          decision_id: CLI_CONNECT_002,
+          trace_id: trace?.traceId,
+          turn_id: trace?.turnId,
+          session_id: trace?.sessionId,
+          data: {
+            cliPath,
+            chunkLength: text.length,
+            preview: summarizeCliOutput(text),
+          },
+        });
+      }
     });
 
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
+    child.stderr?.on("data", (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      if (!stderrObserved && text.trim()) {
+        stderrObserved = true;
+        cliLog({
+          level: "info",
+          message: "letta-code CLI stderr observed",
+          decision_id: CLI_CONNECT_003,
+          trace_id: trace?.traceId,
+          turn_id: trace?.turnId,
+          session_id: trace?.sessionId,
+          data: {
+            cliPath,
+            chunkLength: text.length,
+            preview: summarizeCliOutput(text),
+          },
+        });
+      }
     });
 
     child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      cliLog({
+        level: "error",
+        message: "letta-code CLI spawn failed",
+        decision_id: CLI_CONNECT_006,
+        error_code: E_LETTA_CLI_SPAWN_FAILED,
+        trace_id: trace?.traceId,
+        turn_id: trace?.turnId,
+        session_id: trace?.sessionId,
+        data: {
+          cliPath,
+          command,
+          error: error.message,
+        },
+      });
       rejectPromise(error);
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      settled = true;
+
+      const stdoutPreview = stdout.trim() ? summarizeCliOutput(stdout) : undefined;
+      const stderrPreview = stderr.trim() ? summarizeCliOutput(stderr) : undefined;
+      const summaryData = {
+        cliPath,
+        command,
+        exitCode: code,
+        signal: signal ?? undefined,
+        stdoutLength: stdout.length,
+        stderrLength: stderr.length,
+        stdoutPreview,
+        stderrPreview,
+      };
+
       if (code === 0) {
+        cliLog({
+          level: "info",
+          message: "letta-code CLI exited successfully",
+          decision_id: CLI_CONNECT_004,
+          trace_id: trace?.traceId,
+          turn_id: trace?.turnId,
+          session_id: trace?.sessionId,
+          data: summaryData,
+        });
         resolvePromise();
         return;
       }
+
+      cliLog({
+        level: "error",
+        message: "letta-code CLI exited non-zero",
+        decision_id: CLI_CONNECT_005,
+        error_code: E_LETTA_CLI_EXIT_NON_ZERO,
+        trace_id: trace?.traceId,
+        turn_id: trace?.turnId,
+        session_id: trace?.sessionId,
+        data: summaryData,
+      });
 
       const details = [stderr.trim(), stdout.trim()].filter(Boolean).join("\n");
       rejectPromise(
@@ -255,7 +379,7 @@ export async function ensureCompatibleProvider(
   const providerBaseUrl = normalizeUrl(config.LETTA_BASE_URL);
   const serverBaseUrl = normalizeUrl(
     app.isPackaged
-      ? await waitForBundledLettaServerReady()
+      ? await waitForBundledLettaServerReady(undefined, trace)
       : getCompatibleLettaServerUrl(),
   );
   const compatibleProvider = {

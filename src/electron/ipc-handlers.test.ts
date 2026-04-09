@@ -5,6 +5,7 @@ const runLettaMock = vi.hoisted(() => vi.fn());
 const createSessionProjectionMock = vi.hoisted(() => vi.fn());
 const updateSessionProjectionMock = vi.hoisted(() => vi.fn());
 const getSessionProjectionMock = vi.hoisted(() => vi.fn());
+const getSessionProjectionHistoryMock = vi.hoisted(() => vi.fn());
 const deleteSessionProjectionMock = vi.hoisted(() => vi.fn());
 const clearCodeIslandObservationMock = vi.hoisted(() => vi.fn());
 const finishCodeIslandObservationMock = vi.hoisted(() => vi.fn());
@@ -29,6 +30,7 @@ vi.mock("./libs/runtime-state.js", () => ({
 	createSessionProjection: createSessionProjectionMock,
 	updateSessionProjection: updateSessionProjectionMock,
 	getSessionProjection: getSessionProjectionMock,
+	getSessionProjectionHistory: getSessionProjectionHistoryMock,
 	deleteSessionProjection: deleteSessionProjectionMock,
 }));
 
@@ -42,6 +44,7 @@ describe("handleClientEvent", () => {
 		vi.resetModules();
 		vi.clearAllMocks();
 		getSessionProjectionMock.mockReturnValue(undefined);
+		getSessionProjectionHistoryMock.mockReturnValue([]);
 	});
 
 	it("broadcasts runner.error when session start fails", async () => {
@@ -73,5 +76,94 @@ describe("handleClientEvent", () => {
 				message: "Error: compatible bootstrap failed",
 			},
 		});
+	});
+
+	it("logs and surfaces a stable history load failure", async () => {
+		getSessionProjectionMock.mockReturnValue({
+			conversationId: "conv-history",
+			title: "History session",
+			status: "running",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			pendingPermissions: new Map(),
+			messages: [],
+		});
+		getSessionProjectionHistoryMock.mockImplementation(() => {
+			throw new Error("history unavailable");
+		});
+
+		const { handleClientEvent } = await import("./ipc-handlers.ts");
+		const { getDiagnosticSummary, resetDiagnosticsForTests } = await import("./libs/diagnostics.ts");
+
+		try {
+			await handleClientEvent({
+				type: "session.history",
+				payload: {
+					sessionId: "conv-history",
+				},
+			});
+
+			expect(sendMock).toHaveBeenCalledTimes(1);
+			const payload = JSON.parse(sendMock.mock.calls[0][1] as string);
+			expect(payload).toMatchObject({
+				type: "runner.error",
+				payload: {
+					sessionId: "conv-history",
+					message: "Error: history unavailable",
+				},
+			});
+
+			expect(getDiagnosticSummary(payload.payload.traceId)).toMatchObject({
+				sessionId: "conv-history",
+				firstFailedDecisionId: "SESSION_HISTORY_003",
+				errorCode: "E_HISTORY_LOAD_FAILED",
+			});
+		} finally {
+			resetDiagnosticsForTests();
+		}
+	});
+
+	it("surfaces a stable permission response missing failure", async () => {
+		getSessionProjectionMock.mockReturnValue({
+			conversationId: "conv-permission",
+			title: "Permission session",
+			status: "running",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			pendingPermissions: new Map(),
+			messages: [],
+		});
+
+		const { handleClientEvent } = await import("./ipc-handlers.ts");
+		const { getDiagnosticSummary, resetDiagnosticsForTests } = await import("./libs/diagnostics.ts");
+
+		try {
+			await handleClientEvent({
+				type: "permission.response",
+				payload: {
+					sessionId: "conv-permission",
+					toolUseId: "tool-missing",
+					result: { behavior: "allow" },
+				},
+			});
+
+			expect(sendMock).toHaveBeenCalledTimes(1);
+			const payload = JSON.parse(sendMock.mock.calls[0][1] as string);
+			expect(payload).toMatchObject({
+				type: "runner.error",
+				payload: {
+					sessionId: "conv-permission",
+					message: "Permission response did not match an active pending request.",
+				},
+			});
+
+			expect(getDiagnosticSummary(payload.payload.traceId)).toMatchObject({
+				sessionId: "conv-permission",
+				firstFailedDecisionId: "PERMISSION_RESPONSE_003",
+				errorCode: "E_PERMISSION_RESPONSE_MISSING",
+			});
+		} finally {
+			resetDiagnosticsForTests();
+		}
 	});
 });

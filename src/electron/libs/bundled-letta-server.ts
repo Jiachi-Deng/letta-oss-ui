@@ -7,6 +7,30 @@ import {
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { app } from "electron";
+import {
+  E_SERVER_EXITED_EARLY,
+  E_SERVER_HEALTHCHECK_TIMEOUT,
+  E_SERVER_START_FAILED,
+  E_SERVER_UNEXPECTED_EXIT,
+  type ErrorCode,
+} from "../../shared/error-codes.js";
+import {
+  SERVER_ALREADY_RUNNING_001,
+  SERVER_EXIT_001,
+  SERVER_EXIT_002,
+  SERVER_HEALTHCHECK_001,
+  SERVER_HEALTHCHECK_002,
+  SERVER_RECOVERY_001,
+  SERVER_RESOLVE_001,
+  SERVER_RESOLVE_002,
+  SERVER_START_001,
+  SERVER_START_002,
+  type DecisionId,
+} from "../../shared/decision-ids.js";
+import {
+  createComponentLogger,
+  type TraceContext,
+} from "./trace.js";
 
 const DEFAULT_PACKAGED_SERVER_PORT = 18383;
 const DEFAULT_DEVELOPMENT_SERVER_PORT = 8283;
@@ -14,6 +38,7 @@ const STARTUP_TIMEOUT_MS = 45_000;
 const POLL_INTERVAL_MS = 750;
 const LOCAL_SERVER_API_KEY = "local-dev-key";
 const SERVER_INIT_TIMEOUT_MS = 30_000;
+const serverLog = createComponentLogger("bundled-letta-server");
 
 export type BundledLettaServerResolution = {
   pythonPath: string;
@@ -102,6 +127,26 @@ function logServerLine(prefix: string, line: string): void {
   appendFileSync(logPath, `[${new Date().toISOString()}] ${prefix}${line}\n`);
 }
 
+function logServerEvent(
+  level: "debug" | "info" | "warn" | "error",
+  message: string,
+  trace: TraceContext | undefined,
+  data: Record<string, unknown> = {},
+  decisionId?: DecisionId,
+  errorCode?: ErrorCode,
+): void {
+  serverLog({
+    level,
+    message,
+    decision_id: decisionId,
+    error_code: errorCode,
+    trace_id: trace?.traceId,
+    turn_id: trace?.turnId,
+    session_id: trace?.sessionId,
+    data,
+  });
+}
+
 function getBundledServerHomeDir(): string {
   if (!app.isReady()) {
     throw new Error("Bundled Letta server home cannot be resolved before Electron app is ready.");
@@ -122,13 +167,26 @@ function getBundledServerDbPath(): string {
   return path.join(getBundledServerDataDir(), "letta.db");
 }
 
-function resolveCandidate(source: BundledLettaServerResolution["source"], rootPath: string): BundledLettaServerResolution | null {
+function resolveCandidate(
+  source: BundledLettaServerResolution["source"],
+  rootPath: string,
+  trace?: TraceContext,
+): BundledLettaServerResolution | null {
   const pythonPath = path.join(rootPath, "venv", "bin", "python3");
-  if (!existsSync(pythonPath)) return null;
+  if (!existsSync(pythonPath)) {
+    logServerEvent(
+      "debug",
+      "bundled server candidate missing python runtime",
+      trace,
+      { source, rootPath, pythonPath },
+      SERVER_RESOLVE_002,
+    );
+    return null;
+  }
   const pythonHome = path.join(rootPath, "python-base", "Python.framework", "Versions", "3.11");
   const nltkDataPath = path.join(rootPath, "nltk_data");
 
-  return {
+  const resolution = {
     pythonPath,
     pythonHome: existsSync(pythonHome) ? pythonHome : undefined,
     nltkDataPath: existsSync(nltkDataPath) ? nltkDataPath : undefined,
@@ -136,9 +194,25 @@ function resolveCandidate(source: BundledLettaServerResolution["source"], rootPa
     source,
     baseUrl: getBundledLettaServerUrl(),
   };
+
+  logServerEvent(
+    "info",
+    "bundled server candidate resolved",
+    trace,
+    {
+      source,
+      rootPath,
+      pythonPath,
+      hasPythonHome: Boolean(resolution.pythonHome),
+      hasNltkDataPath: Boolean(resolution.nltkDataPath),
+    },
+    SERVER_RESOLVE_001,
+  );
+
+  return resolution;
 }
 
-export function resolveBundledLettaServer(): BundledLettaServerResolution | null {
+export function resolveBundledLettaServer(trace?: TraceContext): BundledLettaServerResolution | null {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   const lettaUiRoot = path.resolve(moduleDir, "../../..");
   const workspaceRoot = path.resolve(lettaUiRoot, "../..");
@@ -156,30 +230,85 @@ export function resolveBundledLettaServer(): BundledLettaServerResolution | null
     const resolution = source === "dev-venv"
       ? (() => {
           const pythonPath = path.join(candidateRoot, "bin", "python3");
-          if (!existsSync(pythonPath)) return null;
-          return {
+          if (!existsSync(pythonPath)) {
+            logServerEvent(
+              "debug",
+              "bundled server development candidate missing python runtime",
+              trace,
+              { source, rootPath: candidateRoot, pythonPath },
+              SERVER_RESOLVE_002,
+            );
+            return null;
+          }
+          const candidate = {
             pythonPath,
             pythonHome: undefined,
             rootPath: candidateRoot,
             source,
             baseUrl: getBundledLettaServerUrl(),
           } satisfies BundledLettaServerResolution;
+          logServerEvent(
+            "info",
+            "bundled server development candidate resolved",
+            trace,
+            {
+              source,
+              rootPath: candidateRoot,
+              pythonPath,
+            },
+            SERVER_RESOLVE_001,
+          );
+          return candidate;
         })()
-      : resolveCandidate(source, candidateRoot);
+      : resolveCandidate(source, candidateRoot, trace);
 
     if (resolution) {
       return resolution;
     }
   }
 
+  logServerEvent(
+    "error",
+    "bundled server runtime could not be resolved",
+    trace,
+    {
+      candidates: candidates.map(([source, candidateRoot]) => ({ source, candidateRoot })),
+    },
+    SERVER_RESOLVE_002,
+    E_SERVER_START_FAILED,
+  );
+
   return null;
 }
 
-async function checkHealth(baseUrl: string): Promise<boolean> {
+async function checkHealth(baseUrl: string, trace?: TraceContext): Promise<boolean> {
   try {
     const response = await fetch(`${baseUrl}/v1/health/`);
-    return response.ok;
+    if (response.ok) {
+      logServerEvent(
+        "info",
+        "bundled server healthcheck succeeded",
+        trace,
+        { baseUrl, status: response.status },
+        SERVER_HEALTHCHECK_001,
+      );
+      return true;
+    }
+
+    logServerEvent(
+      "debug",
+      "bundled server healthcheck returned non-ok response",
+      trace,
+      { baseUrl, status: response.status },
+    );
+    return false;
   } catch {
+    logServerEvent(
+      "debug",
+      "bundled server healthcheck request failed",
+      trace,
+      { baseUrl },
+    );
     return false;
   }
 }
@@ -223,9 +352,24 @@ function buildBundledServerEnv(resolution: BundledLettaServerResolution): NodeJS
   };
 }
 
-function spawnBundledServer(resolution: BundledLettaServerResolution): ChildProcess {
+function spawnBundledServer(
+  resolution: BundledLettaServerResolution,
+  trace?: TraceContext,
+): ChildProcess {
   const baseUrl = getBundledLettaServerUrl();
   const port = new URL(baseUrl).port || String(getBundledServerPort());
+  logServerEvent(
+    "info",
+    "bundled server spawn started",
+    trace,
+    {
+      rootPath: resolution.rootPath,
+      pythonPath: resolution.pythonPath,
+      baseUrl,
+      port,
+    },
+    SERVER_START_001,
+  );
 
   const child = spawn(
     resolution.pythonPath,
@@ -254,8 +398,46 @@ function spawnBundledServer(resolution: BundledLettaServerResolution): ChildProc
     logServerLine("[stderr] ", chunk.toString().trimEnd());
   });
 
+  child.on("error", (error) => {
+    serverProcess = null;
+    syncRuntimeStatus({
+      running: false,
+      ready: false,
+      pid: undefined,
+      status: "failed",
+      lastError: `Bundled Letta server spawn failed: ${String(error)}`,
+    });
+    logServerEvent(
+      "error",
+      "bundled server spawn failed",
+      trace,
+      {
+        rootPath: resolution.rootPath,
+        pythonPath: resolution.pythonPath,
+        baseUrl,
+        error: String(error),
+      },
+      SERVER_START_002,
+      E_SERVER_START_FAILED,
+    );
+  });
+
   child.on("exit", (code, signal) => {
     serverProcess = null;
+    if (stoppingServer) {
+      syncRuntimeStatus({
+        running: false,
+        ready: false,
+        pid: undefined,
+        status: "ready",
+        lastError: undefined,
+      });
+      stoppingServer = false;
+      return;
+    }
+
+    const exitedBeforeReady = !runtimeStatus.ready;
+    const unexpectedExit = !stoppingServer && runtimeStatus.ready;
     syncRuntimeStatus({
       running: false,
       ready: false,
@@ -265,7 +447,33 @@ function spawnBundledServer(resolution: BundledLettaServerResolution): ChildProc
         ? undefined
         : `Bundled Letta server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`,
     });
-    stoppingServer = false;
+    if (exitedBeforeReady) {
+      logServerEvent(
+        "error",
+        "bundled server exited before it became ready",
+        trace,
+        {
+          code,
+          signal,
+          baseUrl,
+        },
+        SERVER_EXIT_001,
+        E_SERVER_EXITED_EARLY,
+      );
+    } else if (unexpectedExit) {
+      logServerEvent(
+        "error",
+        "bundled server exited unexpectedly after becoming ready",
+        trace,
+        {
+          code,
+          signal,
+          baseUrl,
+        },
+        SERVER_EXIT_002,
+        E_SERVER_UNEXPECTED_EXIT,
+      );
+    }
   });
 
   return child;
@@ -273,12 +481,31 @@ function spawnBundledServer(resolution: BundledLettaServerResolution): ChildProc
 
 async function initializeBundledServerDatabase(
   resolution: BundledLettaServerResolution,
+  trace?: TraceContext,
 ): Promise<void> {
   if (existsSync(getBundledServerDbPath())) {
+    logServerEvent(
+      "debug",
+      "bundled server database already initialized",
+      trace,
+      {
+        dbPath: getBundledServerDbPath(),
+      },
+    );
     return;
   }
 
   logServerLine("[init] ", "Initializing bundled Letta server database.");
+  logServerEvent(
+    "info",
+    "bundled server database initialization started",
+    trace,
+    {
+      dbPath: getBundledServerDbPath(),
+      rootPath: resolution.rootPath,
+    },
+    SERVER_START_002,
+  );
 
   const initScript = `
 import asyncio
@@ -331,10 +558,32 @@ asyncio.run(main())
     child.on("exit", (code) => {
       clearTimeout(timeout);
       if (code === 0) {
+        logServerEvent(
+          "info",
+          "bundled server database initialization completed",
+          trace,
+          {
+            dbPath: getBundledServerDbPath(),
+          },
+          SERVER_START_002,
+        );
         resolve();
         return;
       }
 
+      logServerEvent(
+        "error",
+        "bundled server database initialization failed",
+        trace,
+        {
+          dbPath: getBundledServerDbPath(),
+          code,
+          stderr: stderr || undefined,
+          stdout: stdout || undefined,
+        },
+        SERVER_START_002,
+        E_SERVER_START_FAILED,
+      );
       reject(
         new Error(
           `Bundled Letta server database initialization failed with code ${code ?? "null"}.\n${stderr || stdout}`.trim(),
@@ -344,20 +593,30 @@ asyncio.run(main())
   });
 }
 
-export async function ensureBundledLettaServerStarted(): Promise<StartupResult> {
+export async function ensureBundledLettaServerStarted(
+  trace?: TraceContext,
+): Promise<StartupResult> {
   if (startupPromise) {
     return startupPromise;
   }
 
   startupPromise = (async () => {
     const baseUrl = getBundledLettaServerUrl();
-    const resolution = resolveBundledLettaServer();
+    const resolution = resolveBundledLettaServer(trace);
 
     if (!runtimeStatus.platformSupported) {
       return { status: "unsupported" };
     }
 
     if (!resolution) {
+      logServerEvent(
+        "error",
+        "bundled server runtime is missing",
+        trace,
+        { baseUrl },
+        SERVER_RESOLVE_002,
+        E_SERVER_START_FAILED,
+      );
       syncRuntimeStatus({
         available: false,
         running: false,
@@ -375,7 +634,14 @@ export async function ensureBundledLettaServerStarted(): Promise<StartupResult> 
       baseUrl,
     });
 
-    if (await checkHealth(baseUrl)) {
+    if (await checkHealth(baseUrl, trace)) {
+      logServerEvent(
+        "info",
+        "bundled server is already running",
+        trace,
+        { baseUrl },
+        SERVER_ALREADY_RUNNING_001,
+      );
       syncRuntimeStatus({
         running: true,
         ready: true,
@@ -387,9 +653,17 @@ export async function ensureBundledLettaServerStarted(): Promise<StartupResult> 
 
     if (!serverProcess) {
       try {
-        await initializeBundledServerDatabase(resolution);
+        await initializeBundledServerDatabase(resolution, trace);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        logServerEvent(
+          "error",
+          "bundled server startup failed during database initialization",
+          trace,
+          { baseUrl, error: message },
+          SERVER_START_002,
+          E_SERVER_START_FAILED,
+        );
         syncRuntimeStatus({
           available: true,
           running: false,
@@ -401,7 +675,7 @@ export async function ensureBundledLettaServerStarted(): Promise<StartupResult> 
         });
         throw error;
       }
-      serverProcess = spawnBundledServer(resolution);
+      serverProcess = spawnBundledServer(resolution, trace);
       syncRuntimeStatus({
         running: true,
         ready: false,
@@ -411,6 +685,17 @@ export async function ensureBundledLettaServerStarted(): Promise<StartupResult> 
         baseUrl,
         lastError: undefined,
       });
+    } else {
+      logServerEvent(
+        "info",
+        "bundled server startup already in progress, reusing existing child process",
+        trace,
+        {
+          baseUrl,
+          pid: serverProcess.pid,
+        },
+        SERVER_RECOVERY_001,
+      );
     }
 
     return { status: "starting", resolution };
@@ -423,8 +708,11 @@ export async function ensureBundledLettaServerStarted(): Promise<StartupResult> 
   }
 }
 
-export async function waitForBundledLettaServerReady(timeoutMs = STARTUP_TIMEOUT_MS): Promise<string> {
-  const startupResult = await ensureBundledLettaServerStarted();
+export async function waitForBundledLettaServerReady(
+  timeoutMs = STARTUP_TIMEOUT_MS,
+  trace?: TraceContext,
+): Promise<string> {
+  const startupResult = await ensureBundledLettaServerStarted(trace);
   const baseUrl = startupResult.resolution?.baseUrl ?? getBundledLettaServerUrl();
 
   if (startupResult.status === "missing") {
@@ -435,9 +723,24 @@ export async function waitForBundledLettaServerReady(timeoutMs = STARTUP_TIMEOUT
     throw new Error("Bundled Letta server is only supported on macOS Apple Silicon in this build.");
   }
 
+  if (runtimeStatus.status === "failed" && !runtimeStatus.ready) {
+    logServerEvent(
+      "error",
+      "bundled server startup failed before readiness",
+      trace,
+      {
+        baseUrl,
+        lastError: runtimeStatus.lastError,
+      },
+      SERVER_EXIT_001,
+      E_SERVER_EXITED_EARLY,
+    );
+    throw new Error(runtimeStatus.lastError ?? `Bundled Letta server failed before readiness at ${baseUrl}.`);
+  }
+
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await checkHealth(baseUrl)) {
+    if (await checkHealth(baseUrl, trace)) {
       syncRuntimeStatus({
         running: true,
         ready: true,
@@ -447,9 +750,36 @@ export async function waitForBundledLettaServerReady(timeoutMs = STARTUP_TIMEOUT
       return baseUrl;
     }
 
+    if (!serverProcess && runtimeStatus.status === "failed") {
+      logServerEvent(
+        "error",
+        "bundled server child exited before readiness while waiting for healthcheck",
+        trace,
+        {
+          baseUrl,
+          lastError: runtimeStatus.lastError,
+        },
+        SERVER_EXIT_001,
+        E_SERVER_EXITED_EARLY,
+      );
+      throw new Error(runtimeStatus.lastError ?? `Bundled Letta server exited before readiness at ${baseUrl}.`);
+    }
+
     await sleep(POLL_INTERVAL_MS);
   }
 
+  logServerEvent(
+    "error",
+    "bundled server healthcheck timed out",
+    trace,
+    {
+      baseUrl,
+      timeoutMs,
+      lastError: runtimeStatus.lastError,
+    },
+    SERVER_HEALTHCHECK_002,
+    E_SERVER_HEALTHCHECK_TIMEOUT,
+  );
   syncRuntimeStatus({
     running: Boolean(serverProcess),
     ready: false,

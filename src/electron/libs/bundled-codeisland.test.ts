@@ -4,10 +4,14 @@ import {
   CI_BOOT_002,
   CI_BOOT_003,
   CI_BOOT_004,
+  CI_LAUNCH_001,
+  CI_LAUNCH_002,
+  CI_LAUNCH_003,
 } from "../../shared/decision-ids.js";
 import {
   E_CODEISLAND_BUNDLE_MISSING,
   E_CODEISLAND_LAUNCH_BLOCKED,
+  E_CODEISLAND_LAUNCH_COMMAND_FAILED,
   E_CODEISLAND_OS_UNSUPPORTED,
 } from "../../shared/error-codes.js";
 
@@ -171,8 +175,83 @@ describe("bundled CodeIsland observability", () => {
           component: "bundled-codeisland",
           trace_id: "trc_ci_launch",
           turn_id: "turn_ci_launch",
+          decision_id: CI_LAUNCH_001,
+        }),
+        expect.objectContaining({
+          component: "bundled-codeisland",
+          trace_id: "trc_ci_launch",
+          turn_id: "turn_ci_launch",
+          decision_id: CI_LAUNCH_002,
+        }),
+        expect.objectContaining({
+          component: "bundled-codeisland",
+          trace_id: "trc_ci_launch",
+          turn_id: "turn_ci_launch",
           decision_id: CI_BOOT_004,
           error_code: E_CODEISLAND_LAUNCH_BLOCKED,
+        }),
+      ]),
+    );
+  });
+
+  it("emits a launch command failure with a stable error code", async () => {
+    existsSyncMock.mockReturnValue(true);
+    spawnSyncMock.mockImplementation((command: string) => {
+      if (command === "pgrep") {
+        return { status: 1 };
+      }
+      if (command === "open") {
+        return {
+          status: 1,
+          stdout: "",
+          stderr: "open failed",
+        };
+      }
+      if (command === "xattr") {
+        return { status: 1, stdout: "", stderr: "" };
+      }
+      return { status: 1, stdout: "", stderr: "" };
+    });
+    const events: Array<Record<string, unknown>> = [];
+    const trace = await import("./trace.ts");
+    trace.setTraceSink((event) => {
+      events.push(event as unknown as Record<string, unknown>);
+    });
+    const { ensureCodeIslandStarted } = await import("./bundled-codeisland.ts");
+
+    const result = ensureCodeIslandStarted(
+      {
+        appPath: "/Applications/Letta.app/Contents/Resources/app.asar",
+        cwd: "/tmp",
+        isPackaged: true,
+        platform: "darwin",
+        resourcesPath: "/Applications/Letta.app/Contents/Resources",
+        systemVersion: "14.5.0",
+      },
+      { trace: { traceId: "trc_ci_launch_fail", turnId: "turn_ci_launch_fail" } },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          component: "bundled-codeisland",
+          trace_id: "trc_ci_launch_fail",
+          turn_id: "turn_ci_launch_fail",
+          decision_id: CI_LAUNCH_001,
+        }),
+        expect.objectContaining({
+          component: "bundled-codeisland",
+          trace_id: "trc_ci_launch_fail",
+          turn_id: "turn_ci_launch_fail",
+          decision_id: CI_LAUNCH_002,
+        }),
+        expect.objectContaining({
+          component: "bundled-codeisland",
+          trace_id: "trc_ci_launch_fail",
+          turn_id: "turn_ci_launch_fail",
+          decision_id: CI_LAUNCH_003,
+          error_code: E_CODEISLAND_LAUNCH_COMMAND_FAILED,
         }),
       ]),
     );
