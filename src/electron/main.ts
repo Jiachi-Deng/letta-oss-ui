@@ -7,6 +7,12 @@ import { handleClientEvent, cleanupAllSessions } from "./ipc-handlers.js";
 import type { ClientEvent } from "./types.js";
 import { getAppConfigState, initializeAppConfig, saveAppConfig } from "./libs/config.js";
 import {
+    configureBundledLettaServerEnv,
+    ensureBundledLettaServerStarted,
+    getBundledLettaServerRuntimeStatus,
+    stopBundledLettaServer,
+} from "./libs/bundled-letta-server.js";
+import {
     ensureCodeIslandStarted,
     getCodeIslandRuntimeStatus,
     startCodeIslandMonitor,
@@ -17,6 +23,7 @@ const PRODUCT_NAME = "Letta";
 const APP_ID = "com.jachi.letta";
 
 configureRuntimeIdentity();
+configureBundledLettaServerEnv();
 initializeAppConfig();
 
 function configureRuntimeIdentity(): void {
@@ -66,6 +73,7 @@ function cleanup(): void {
     stopPolling();
     codeIslandMonitor?.stop();
     codeIslandMonitor = null;
+    stopBundledLettaServer();
     cleanupAllSessions();
     killViteDevServer();
 }
@@ -89,6 +97,16 @@ app.on("ready", () => {
     process.on("SIGTERM", handleSignal);
     process.on("SIGINT", handleSignal);
     process.on("SIGHUP", handleSignal);
+
+    void ensureBundledLettaServerStarted()
+        .then((startup) => {
+            if (startup.status !== "unsupported") {
+                console.log(`[letta-server] Startup status: ${startup.status}`);
+            }
+        })
+        .catch((error) => {
+            console.error("[letta-server] Failed to start bundled server:", error);
+        });
 
     const codeIslandStartup = ensureCodeIslandStarted();
     codeIslandMonitor = startCodeIslandMonitor();
@@ -126,7 +144,7 @@ app.on("ready", () => {
     pollResources(mainWindow);
 
     ipcMainHandle("getStaticData", () => {
-        return getStaticData(getCodeIslandRuntimeStatus());
+        return getStaticData(getCodeIslandRuntimeStatus(), getBundledLettaServerRuntimeStatus());
     });
 
     ipcMainHandle("get-app-config", () => {

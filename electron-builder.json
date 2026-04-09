@@ -17,6 +17,10 @@
         {
             "from": "build-resources/CodeIsland.app",
             "to": "CodeIsland.app"
+        },
+        {
+            "from": "build-resources/LettaServer",
+            "to": "LettaServer"
         }
     ],
     "asarUnpack": [

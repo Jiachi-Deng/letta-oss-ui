@@ -11,6 +11,7 @@ node_modules
 dist
 dist-react
 dist-electron
+build-resources
 *.local
 
 # Editor directories and files
@@ -31,3 +32,4 @@ bun.lock
 
 # Letta
 .letta/
+openapi_*.json

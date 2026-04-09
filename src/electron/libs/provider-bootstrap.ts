@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { app } from "electron";
 import type { ConnectionType, LettaAppConfig } from "./config.js";
 import { getCompatibleLettaServerUrl } from "./config.js";
+import { waitForBundledLettaServerReady } from "./bundled-letta-server.js";
 
 type SupportedProviderType = "anthropic" | "minimax" | "openai";
 
@@ -197,7 +198,11 @@ export async function ensureCompatibleProvider(
   }
 
   const providerBaseUrl = normalizeUrl(config.LETTA_BASE_URL);
-  const serverBaseUrl = normalizeUrl(getCompatibleLettaServerUrl());
+  const serverBaseUrl = normalizeUrl(
+    app.isPackaged
+      ? await waitForBundledLettaServerReady()
+      : getCompatibleLettaServerUrl(),
+  );
   const compatibleProvider = {
     ...getCompatibleProviderSpec(config.connectionType, config.model ?? ""),
     serverBaseUrl,

@@ -8,6 +8,22 @@ type StaticData = {
     totalStorage: number;
     cpuModel: string;
     totalMemoryGB: number;
+    lettaServer?: {
+        platformSupported: boolean;
+        available: boolean;
+        running: boolean;
+        ready: boolean;
+        status: "unsupported" | "missing" | "starting" | "ready" | "already-running" | "failed";
+        baseUrl: string;
+        resolution?: {
+            pythonPath: string;
+            rootPath: string;
+            source: "bundled" | "build-resource" | "dev-venv";
+            baseUrl: string;
+        };
+        pid?: number;
+        lastError?: string;
+    };
     codeIsland?: {
         platformSupported: boolean;
         available: boolean;

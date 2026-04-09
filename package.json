@@ -2,7 +2,7 @@
 	"name": "letta",
 	"productName": "Letta",
 	"private": true,
-	"version": "0.1.0",
+	"version": "0.1.2",
 	"type": "module",
 	"main": "dist-electron/main.js",
 	"scripts": {
@@ -13,6 +13,10 @@
 		"test": "vitest",
 		"test:run": "vitest run",
 		"sync:letta-code": "bun run --cwd ../letta-code build && bun install && node ./scripts/sync-letta-code.mjs",
+		"build:letta-server": "node ./scripts/build-letta-server.mjs",
+		"verify:letta-server": "node ./scripts/verify-letta-server.mjs",
+		"smoke:letta-server": "node ./scripts/smoke-letta-server.mjs",
+		"release:check": "node ./scripts/release-check.mjs",
 		"build:codeisland": "node ./scripts/build-codeisland.mjs",
 		"build:codeisland:arm64": "node ./scripts/build-codeisland.mjs arm64",
 		"build:codeisland:x64": "node ./scripts/build-codeisland.mjs x64",
@@ -20,7 +24,7 @@
 		"lint": "eslint .",
 		"preview": "vite preview",
 		"transpile:electron": "tsc --project src/electron/tsconfig.json",
-		"dist:mac-arm64": "bun run sync:letta-code && bun run build:codeisland:arm64 && bun run transpile:electron && bun run build && electron-builder --mac --arm64",
+		"dist:mac-arm64": "bun run sync:letta-code && bun run build:letta-server && bun run build:codeisland:arm64 && bun run transpile:electron && bun run build && electron-builder --mac --arm64",
 		"dist:mac-x64": "bun run sync:letta-code && bun run build:codeisland:x64 && bun run transpile:electron && bun run build && electron-builder --mac --x64",
 		"dist:win": "bun run transpile:electron && bun run build && electron-builder --win --x64",
 		"dist:linux": "bun run transpile:electron && bun run build && electron-builder --linux --x64"

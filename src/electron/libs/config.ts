@@ -5,7 +5,9 @@ import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const DEFAULT_LETTA_BASE_URL = "https://api.letta.com";
-const DEFAULT_LOCAL_LETTA_SERVER_URL = "http://localhost:8283";
+const DEFAULT_LOCAL_LETTA_SERVER_URL = app.isPackaged
+  ? "http://127.0.0.1:18383"
+  : "http://localhost:8283";
 const CONFIG_FILE_NAME = "config.json";
 const DEFAULT_CONNECTION_TYPE = "letta-server";
 

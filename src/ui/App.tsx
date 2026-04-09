@@ -24,6 +24,7 @@ function App() {
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [codeIslandWarning, setCodeIslandWarning] = useState<string | null>(null);
+  const [lettaServerWarning, setLettaServerWarning] = useState<string | null>(null);
   const [connectionWarning, setConnectionWarning] = useState<string | null>(null);
   const [configState, setConfigState] = useState<Awaited<ReturnType<Window["electron"]["getAppConfig"]>> | null>(null);
   const prevMessagesLengthRef = useRef(0);
@@ -144,10 +145,27 @@ function App() {
 
         if (staticData.codeIsland?.platformSupported && !staticData.codeIsland.available) {
           setCodeIslandWarning("Bundled CodeIsland.app is missing. Letta will keep working, but the notch companion is unavailable.");
+        } else {
+          setCodeIslandWarning(null);
+        }
+
+        const needsBundledServer = configState?.config.connectionType !== "letta-server";
+
+        if (needsBundledServer && staticData.lettaServer?.platformSupported && !staticData.lettaServer.available) {
+          setLettaServerWarning("Bundled Letta server runtime is missing. Compatible provider modes will not be available in this build.");
           return;
         }
 
-        setCodeIslandWarning(null);
+        if (needsBundledServer && staticData.lettaServer?.status === "failed") {
+          setLettaServerWarning(
+            staticData.lettaServer.lastError
+              ? `Bundled Letta server failed to start: ${staticData.lettaServer.lastError}`
+              : "Bundled Letta server failed to start.",
+          );
+          return;
+        }
+
+        setLettaServerWarning(null);
       })
       .catch((error) => {
         console.error("Failed to load static app data:", error);
@@ -156,7 +174,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [configState]);
 
   const handleConfigSaved = useCallback((nextConfigState: Awaited<ReturnType<Window["electron"]["getAppConfig"]>>) => {
     setConfigState(nextConfigState);
@@ -311,6 +329,22 @@ function App() {
               <button
                 className="ml-auto text-warning transition-colors hover:text-warning/80"
                 onClick={() => setCodeIslandWarning(null)}
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {lettaServerWarning && (
+          <div className="border-b border-warning/20 bg-warning-light px-6 py-3">
+            <div className="mx-auto flex max-w-3xl items-center gap-3">
+              <span className="text-sm font-medium text-warning">{lettaServerWarning}</span>
+              <button
+                className="ml-auto text-warning transition-colors hover:text-warning/80"
+                onClick={() => setLettaServerWarning(null)}
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M18 6L6 18M6 6l12 12" />
