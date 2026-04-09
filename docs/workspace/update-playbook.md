@@ -57,13 +57,12 @@ The new workspace now uses:
 
 - `origin` for your GitHub forks
 - `upstream` for the official upstream repos
-- `archive-local` for the local archive reference
 
 That means:
 
 1. normal upstream inspection should use `upstream`
 2. normal push targets should use `origin`
-3. the old workspace exists only as a local archive reference
+3. the old archive workspace exists only as a manual filesystem backup
 
 ## Current fork nuance
 

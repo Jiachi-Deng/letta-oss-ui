@@ -54,23 +54,18 @@ Current remotes:
 
 - `app/letta-desktop`
   - origin -> `https://github.com/Jiachi-Deng/letta-oss-ui.git`
-  - archive-local -> `/Users/jachi/Desktop/letta-archive/letta-ui`
   - upstream -> `https://github.com/letta-ai/letta-oss-ui.git`
 - `vendor/letta-monorepo`
   - origin -> `https://github.com/Jiachi-Deng/letta.git`
-  - archive-local -> `/Users/jachi/Desktop/letta-archive`
   - upstream -> `https://github.com/letta-ai/letta`
 - `vendor/letta-code`
   - origin -> `https://github.com/Jiachi-Deng/letta-code.git`
-  - archive-local -> `/Users/jachi/Desktop/letta-archive/letta-code`
   - upstream -> `https://github.com/letta-ai/letta-code.git`
 - `vendor/code-island`
   - origin -> `https://github.com/Jiachi-Deng/CodeIsland.git`
-  - archive-local -> `/Users/jachi/Desktop/letta-archive/code-island`
   - upstream -> `https://github.com/wxtsky/CodeIsland.git`
 - `vendor/letta-code-sdk-local`
   - origin -> `https://github.com/Jiachi-Deng/letta-code-sdk-local.git`
-  - archive-local -> `/Users/jachi/Desktop/letta-archive/letta-code-sdk-local`
 
 The new workspace no longer depends on local-path `origin` remotes.
 
@@ -122,6 +117,5 @@ At the time of writing:
 
 ## What remains as future cleanup
 
-1. decide whether to keep or later remove the `archive-local` remotes
-2. decide whether to keep or later delete the backup branches `archive/pre-sync-main-20260408-211439` on the three vendor forks
-3. decide how long to keep the old archive workspace around
+1. decide how long to keep the old archive workspace around
+2. decide whether the root workspace docs should remain duplicated outside the repo-managed copies
