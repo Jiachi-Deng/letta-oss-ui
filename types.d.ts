@@ -27,12 +27,21 @@ type StaticData = {
     codeIsland?: {
         platformSupported: boolean;
         available: boolean;
-        status: "unsupported" | "missing" | "already-running" | "launched" | "restarted";
+        status: "unsupported" | "missing" | "already-running" | "launched" | "restarted" | "failed";
         running: boolean;
+        minimumMacOSVersion?: string;
+        systemVersion?: string;
         resolution?: {
             appPath: string;
             source: "bundled" | "dev-build" | "applications";
         };
+        diagnostic?: {
+            code: "missing-bundle" | "macos-version-too-old" | "launch-command-failed" | "launch-verification-failed";
+            summary: string;
+            detail?: string;
+            action?: string;
+        };
+        lastError?: string;
     };
 }
 

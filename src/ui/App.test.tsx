@@ -44,11 +44,23 @@ function resetAppStore() {
 describe("App", () => {
 	let serverEventHandler: ((event: ServerEvent) => void) | null;
 	let sendClientEventMock: ReturnType<typeof vi.fn>;
+	let getStaticDataMock: ReturnType<typeof vi.fn>;
 
 	beforeEach(() => {
 		resetAppStore();
 		serverEventHandler = null;
 		sendClientEventMock = vi.fn();
+		getStaticDataMock = vi.fn().mockResolvedValue({
+			totalStorage: 512,
+			cpuModel: "Apple M3",
+			totalMemoryGB: 18,
+			codeIsland: {
+				platformSupported: true,
+				available: true,
+				status: "launched",
+				running: true,
+			},
+		});
 
 		Object.defineProperty(window, "electron", {
 			value: {
@@ -62,17 +74,7 @@ describe("App", () => {
 					canEdit: true,
 					requiresOnboarding: false,
 				}),
-				getStaticData: vi.fn().mockResolvedValue({
-					totalStorage: 512,
-					cpuModel: "Apple M3",
-					totalMemoryGB: 18,
-					codeIsland: {
-						platformSupported: true,
-						available: true,
-						status: "launched",
-						running: true,
-					},
-				}),
+				getStaticData: getStaticDataMock,
 				getRecentCwds: vi.fn().mockResolvedValue([]),
 				selectDirectory: vi.fn().mockResolvedValue(null),
 				saveAppConfig: vi.fn(),
@@ -128,6 +130,60 @@ describe("App", () => {
 		expect(promptInput).toBeEnabled();
 		expect(sendButton).toBeEnabled();
 		expect(screen.getByText("No messages yet")).toBeInTheDocument();
+	});
+
+	it("shows a clear warning when CodeIsland is unsupported on this macOS version", async () => {
+		getStaticDataMock.mockResolvedValue({
+			totalStorage: 512,
+			cpuModel: "Apple M3",
+			totalMemoryGB: 18,
+			codeIsland: {
+				platformSupported: false,
+				available: false,
+				status: "unsupported",
+				running: false,
+				systemVersion: "13.6.9",
+				minimumMacOSVersion: "14.0",
+				diagnostic: {
+					code: "macos-version-too-old",
+					summary: "CodeIsland requires macOS 14+ but this Mac is running macOS 13.6.9.",
+					action: "Update the machine to macOS 14 or later to enable the CodeIsland companion. Letta chat will keep working without it.",
+				},
+			},
+		});
+
+		render(<App />);
+
+		expect(await screen.findByText(/CodeIsland requires macOS 14\+/)).toBeInTheDocument();
+		expect(screen.getByText(/Letta chat will keep working without it/)).toBeInTheDocument();
+	});
+
+	it("shows first-launch security guidance when CodeIsland launch verification fails", async () => {
+		getStaticDataMock.mockResolvedValue({
+			totalStorage: 512,
+			cpuModel: "Apple M3",
+			totalMemoryGB: 18,
+			codeIsland: {
+				platformSupported: true,
+				available: true,
+				status: "failed",
+				running: false,
+				resolution: {
+					appPath: "/Applications/Letta.app/Contents/Resources/CodeIsland.app",
+					source: "bundled",
+				},
+				diagnostic: {
+					code: "launch-verification-failed",
+					summary: "CodeIsland was found but macOS appears to be blocking its first launch.",
+					action: "Open \"/Applications/Letta.app/Contents/Resources/CodeIsland.app\" once in Finder or run 'open \"/Applications/Letta.app/Contents/Resources/CodeIsland.app\"', approve any macOS security prompt in System Settings > Privacy & Security, then relaunch Letta.",
+				},
+			},
+		});
+
+		render(<App />);
+
+		expect(await screen.findByText(/macOS appears to be blocking its first launch/)).toBeInTheDocument();
+		expect(screen.getByText(/Privacy & Security/)).toBeInTheDocument();
 	});
 
 	it("recovers from start failure without leaving pending start stuck", async () => {

@@ -99,8 +99,12 @@ export function startElectronRuntimeServices(): ElectronRuntimeServices {
     );
   } else if (codeIslandStartup.status === "already-running") {
     console.log("[codeisland] Already running; skipping startup launch.");
+  } else if (codeIslandStartup.status === "unsupported") {
+    console.warn("[codeisland] CodeIsland is unsupported on this macOS version. Skipping startup launch.");
   } else if (codeIslandStartup.status === "missing") {
     console.warn("[codeisland] CodeIsland.app was not found. Skipping startup launch.");
+  } else if (codeIslandStartup.status === "failed") {
+    console.warn("[codeisland] CodeIsland launch failed. Letta will continue without the companion app.");
   }
 
   return {

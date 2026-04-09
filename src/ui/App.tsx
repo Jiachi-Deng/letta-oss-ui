@@ -13,6 +13,23 @@ import MDContent from "./render/markdown";
 
 const SCROLL_THRESHOLD = 50;
 
+function formatCodeIslandWarning(staticData: Awaited<ReturnType<Window["electron"]["getStaticData"]>>): string | null {
+  const runtime = staticData.codeIsland;
+  if (!runtime) return null;
+
+  if (runtime.diagnostic) {
+    return [runtime.diagnostic.summary, runtime.diagnostic.detail, runtime.diagnostic.action]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  if (runtime.platformSupported && !runtime.available) {
+    return "Bundled CodeIsland.app is missing. Letta will keep working, but the notch companion is unavailable.";
+  }
+
+  return null;
+}
+
 function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -143,11 +160,7 @@ function App() {
       .then((staticData) => {
         if (cancelled) return;
 
-        if (staticData.codeIsland?.platformSupported && !staticData.codeIsland.available) {
-          setCodeIslandWarning("Bundled CodeIsland.app is missing. Letta will keep working, but the notch companion is unavailable.");
-        } else {
-          setCodeIslandWarning(null);
-        }
+        setCodeIslandWarning(formatCodeIslandWarning(staticData));
 
         const needsBundledServer = configState?.config.connectionType !== "letta-server";
 
