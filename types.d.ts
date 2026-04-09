@@ -1,3 +1,22 @@
+type DiagnosticSummary = {
+    traceId: string;
+    turnId?: string;
+    sessionId?: string;
+    summary: string;
+    errorCode?: string;
+    lastSuccessfulDecisionId?: string;
+    firstFailedDecisionId?: string;
+    suggestedAction?: string;
+    steps: Array<{
+        component: string;
+        decisionId?: string;
+        status: "ok" | "warning" | "error";
+        message: string;
+        errorCode?: string;
+        data?: Record<string, unknown>;
+    }>;
+}
+
 type Statistics = {
     cpuUsage: number;
     ramUsage: number;
@@ -41,6 +60,7 @@ type StaticData = {
             detail?: string;
             action?: string;
         };
+        traceId?: string;
         lastError?: string;
     };
 }
@@ -75,6 +95,8 @@ type EventPayloadMapping = {
     "generate-session-title": string;
     "get-recent-cwds": string[];
     "select-directory": string | null;
+    "get-diagnostic-summary": DiagnosticSummary | null;
+    "get-latest-diagnostic-summary-for-session": DiagnosticSummary | null;
 }
 
 interface Window {
@@ -86,6 +108,8 @@ interface Window {
         onServerEvent: (callback: (event: any) => void) => UnsubscribeFunction;
         getRecentCwds: (limit?: number) => Promise<string[]>;
         getAppConfig: () => Promise<AppConfigState>;
+        getDiagnosticSummary: (traceId: string) => Promise<DiagnosticSummary | null>;
+        getLatestDiagnosticSummaryForSession: (sessionId: string) => Promise<DiagnosticSummary | null>;
         saveAppConfig: (config: {
             connectionType?: "letta-server" | "anthropic-compatible" | "openai-compatible";
             LETTA_BASE_URL?: string;

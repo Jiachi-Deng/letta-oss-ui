@@ -27,6 +27,22 @@ import {
   beginReusableConversationTurn,
   completeReusableConversationTurn,
 } from "./conversation-session-cache.js";
+import {
+  E_SESSION_CONVERSATION_ID_MISSING,
+  E_STREAM_NO_ASSISTANT_OUTPUT,
+} from "../../shared/error-codes.js";
+import {
+  RUNNER_INIT_001,
+  RUNNER_INIT_002,
+  STREAM_001,
+  STREAM_002,
+} from "../../shared/decision-ids.js";
+import {
+  createComponentLogger,
+  createTraceContext,
+  extendTraceContext,
+  type TraceContext,
+} from "./trace.js";
 
 // Simplified session type for runner
 export type RunnerSession = {
@@ -41,6 +57,7 @@ export type RunnerOptions = {
   prompt: string;
   session: RunnerSession;
   resumeConversationId?: string;
+  trace?: TraceContext;
   onEvent: (event: ServerEvent) => void;
   onSessionUpdate?: (updates: { lettaConversationId?: string }) => void;
 };
@@ -51,21 +68,38 @@ export type RunnerHandle = {
 
 const DEFAULT_CWD = process.cwd();
 const DEBUG = process.env.DEBUG_RUNNER === "true";
+const runnerLog = createComponentLogger("runner");
 
-// Simple logger for runner
-const log = (msg: string, data?: Record<string, unknown>) => {
-  const timestamp = new Date().toISOString();
-  if (data) {
-    console.log(`[${timestamp}] [runner] ${msg}`, JSON.stringify(data, null, 2));
-  } else {
-    console.log(`[${timestamp}] [runner] ${msg}`);
-  }
+const log = (
+  msg: string,
+  data?: Record<string, unknown>,
+  context?: TraceContext,
+) => {
+  runnerLog({
+    level: "info",
+    message: msg,
+    data,
+    trace_id: context?.traceId,
+    turn_id: context?.turnId,
+    session_id: context?.sessionId,
+  });
 };
 
 // Debug-only logging (verbose)
-const debug = (msg: string, data?: Record<string, unknown>) => {
+const debug = (
+  msg: string,
+  data?: Record<string, unknown>,
+  context?: TraceContext,
+) => {
   if (!DEBUG) return;
-  log(msg, data);
+  runnerLog({
+    level: "debug",
+    message: msg,
+    data,
+    trace_id: context?.traceId,
+    turn_id: context?.turnId,
+    session_id: context?.sessionId,
+  });
 };
 
 // Store agentId for reuse across conversations
@@ -79,14 +113,23 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
   let keepReusableSession = false;
   let turnLockHeld = false;
   let reusableSessionSignature = "";
+  let traceContext = options.trace ?? createTraceContext();
+  let assistantOutputSeen = false;
+  if (session.id !== "pending") {
+    traceContext = extendTraceContext(traceContext, { sessionId: session.id });
+  }
   
-  debug("runLetta called", {
-    prompt: prompt.slice(0, 100) + (prompt.length > 100 ? "..." : ""),
-    sessionId: session.id,
-    resumeConversationId,
-    cachedAgentId,
-    cwd: session.cwd,
-  });
+  debug(
+    "runLetta called",
+    {
+      prompt: prompt.slice(0, 100) + (prompt.length > 100 ? "..." : ""),
+      sessionId: session.id,
+      resumeConversationId,
+      cachedAgentId,
+      cwd: session.cwd,
+    },
+    traceContext,
+  );
 
   // Mutable sessionId - starts as session.id, updated when conversationId is available
   let currentSessionId = session.id;
@@ -143,17 +186,28 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
 
       // Session options
       const appConfigState = getAppConfigState();
-      const runtimeConnection = await prepareRuntimeConnection(appConfigState.config);
+      const runtimeConnection = await prepareRuntimeConnection(
+        appConfigState.config,
+        traceContext,
+      );
       reusableSessionSignature = JSON.stringify({
         baseUrl: runtimeConnection.baseUrl,
         modelHandle: runtimeConnection.modelHandle ?? "",
         cwd: session.cwd ?? DEFAULT_CWD,
       });
-      log("runtime connection ready", {
-        connectionType: appConfigState.config.connectionType,
-        baseUrl: runtimeConnection.baseUrl,
-        modelHandle: runtimeConnection.modelHandle,
-        bootstrapAction: runtimeConnection.bootstrapAction.kind,
+      runnerLog({
+        level: "info",
+        message: "runtime connection ready",
+        decision_id: RUNNER_INIT_001,
+        trace_id: traceContext.traceId,
+        turn_id: traceContext.turnId,
+        session_id: traceContext.sessionId,
+        data: {
+          connectionType: appConfigState.config.connectionType,
+          baseUrl: runtimeConnection.baseUrl,
+          modelHandle: runtimeConnection.modelHandle,
+          bootstrapAction: runtimeConnection.bootstrapAction.kind,
+        },
       });
 
       const sessionOptions = {
@@ -236,7 +290,14 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
       if (lettaSession.conversationId) {
         currentSessionId = lettaSession.conversationId;
         activeConversationId = lettaSession.conversationId;
-        debug("session initialized", { conversationId: lettaSession.conversationId, agentId: lettaSession.agentId });
+        traceContext = extendTraceContext(traceContext, {
+          sessionId: lettaSession.conversationId,
+        });
+        debug(
+          "session initialized",
+          { conversationId: lettaSession.conversationId, agentId: lettaSession.agentId },
+          traceContext,
+        );
         onSessionUpdate?.({ lettaConversationId: lettaSession.conversationId });
         if (!turnLockHeld) {
           beginReusableConversationTurn(lettaSession.conversationId);
@@ -244,7 +305,15 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
         }
         beginCodeIslandObservation(currentSessionId, session.cwd, prompt);
       } else {
-        log("WARNING: no conversationId available after send()");
+        runnerLog({
+          level: "warn",
+          message: "WARNING: no conversationId available after send()",
+          decision_id: RUNNER_INIT_002,
+          error_code: E_SESSION_CONVERSATION_ID_MISSING,
+          trace_id: traceContext.traceId,
+          turn_id: traceContext.turnId,
+          session_id: traceContext.sessionId,
+        });
       }
 
       // Cache agentId for future conversations
@@ -274,6 +343,20 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
         if (message.type === "assistant") {
           const assistantText = normalizeMessageContent(message.content);
           if (assistantText.trim()) {
+            if (!assistantOutputSeen) {
+              assistantOutputSeen = true;
+              runnerLog({
+                level: "info",
+                message: "first assistant output observed",
+                decision_id: STREAM_001,
+                trace_id: traceContext.traceId,
+                turn_id: traceContext.turnId,
+                session_id: traceContext.sessionId,
+                data: {
+                  preview: assistantText.slice(0, 120),
+                },
+              });
+            }
             mirrorCodeIslandAssistantMessage(currentSessionId, assistantText);
           }
         }
@@ -282,6 +365,23 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
         if (message.type === "result") {
           const status = message.success ? "completed" : "error";
           debug("result received", { success: message.success, status });
+          runnerLog({
+            level: message.success && !assistantOutputSeen ? "warn" : message.success ? "info" : "warn",
+            message: "stream result received",
+            decision_id: STREAM_002,
+            error_code:
+              message.success && !assistantOutputSeen
+                ? E_STREAM_NO_ASSISTANT_OUTPUT
+                : undefined,
+            trace_id: traceContext.traceId,
+            turn_id: traceContext.turnId,
+            session_id: traceContext.sessionId,
+            data: {
+              success: message.success,
+              status,
+              assistantOutputSeen,
+            },
+          });
           keepReusableSession = message.success;
           finishCodeIslandObservation(currentSessionId, {
             success: message.success,
@@ -295,6 +395,18 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
       // Query completed normally
       if (terminalStatus === null) {
         debug("query completed normally");
+        runnerLog({
+          level: assistantOutputSeen ? "info" : "warn",
+          message: "stream completed without explicit result message",
+          decision_id: STREAM_002,
+          error_code: assistantOutputSeen ? undefined : E_STREAM_NO_ASSISTANT_OUTPUT,
+          trace_id: traceContext.traceId,
+          turn_id: traceContext.turnId,
+          session_id: traceContext.sessionId,
+          data: {
+            assistantOutputSeen,
+          },
+        });
         keepReusableSession = true;
         finishCodeIslandObservation(currentSessionId, { success: true });
         sendSessionStatus("completed");
@@ -305,17 +417,21 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
         debug("session aborted");
         return;
       }
-      log("ERROR in runLetta", { 
-        error: String(error), 
+      log("ERROR in runLetta", {
+        error: String(error),
         name: (error as Error).name,
-        stack: (error as Error).stack 
-      });
+        stack: (error as Error).stack,
+      }, traceContext);
       keepReusableSession = false;
       finishCodeIslandObservation(currentSessionId, { error: String(error) });
       if (currentSessionId === "pending") {
         onEvent({
           type: "runner.error",
-          payload: { message: String(error) }
+          payload: {
+            message: String(error),
+            traceId: traceContext.traceId,
+            sessionId: traceContext.sessionId,
+          }
         });
         return;
       }
@@ -337,7 +453,7 @@ export async function runLetta(options: RunnerOptions): Promise<RunnerHandle> {
       } catch (closeError) {
         log("WARNING: failed to close Letta session transport", {
           error: String(closeError),
-        });
+        }, traceContext);
       }
       activeLettaSession = null;
       activeConversationId = null;

@@ -10,24 +10,39 @@ import { OnboardingModal } from "./components/OnboardingModal";
 import { PromptInput, usePromptActions } from "./components/PromptInput";
 import { MessageCard } from "./components/EventCard";
 import MDContent from "./render/markdown";
+import { formatDiagnosticSummary } from "../shared/diagnostics-format";
 
 const SCROLL_THRESHOLD = 50;
+type DiagnosticSummaryPayload = Awaited<ReturnType<Window["electron"]["getDiagnosticSummary"]>>;
+type RunnerErrorContext = {
+  message: string;
+  traceId?: string;
+  sessionId?: string;
+};
 
-function formatCodeIslandWarning(staticData: Awaited<ReturnType<Window["electron"]["getStaticData"]>>): string | null {
+function getCodeIslandWarningDetails(
+  staticData: Awaited<ReturnType<Window["electron"]["getStaticData"]>>,
+): { message: string | null; traceId?: string } {
   const runtime = staticData.codeIsland;
-  if (!runtime) return null;
+  if (!runtime) return { message: null };
 
   if (runtime.diagnostic) {
-    return [runtime.diagnostic.summary, runtime.diagnostic.detail, runtime.diagnostic.action]
-      .filter(Boolean)
-      .join(" ");
+    return {
+      message: [runtime.diagnostic.summary, runtime.diagnostic.detail, runtime.diagnostic.action]
+        .filter(Boolean)
+        .join(" "),
+      traceId: runtime.traceId,
+    };
   }
 
   if (runtime.platformSupported && !runtime.available) {
-    return "Bundled CodeIsland.app is missing. Letta will keep working, but the notch companion is unavailable.";
+    return {
+      message: "Bundled CodeIsland.app is missing. Letta will keep working, but the notch companion is unavailable.",
+      traceId: runtime.traceId,
+    };
   }
 
-  return null;
+  return { message: null, traceId: runtime.traceId };
 }
 
 function App() {
@@ -41,12 +56,18 @@ function App() {
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [codeIslandWarning, setCodeIslandWarning] = useState<string | null>(null);
+  const [codeIslandWarningTraceId, setCodeIslandWarningTraceId] = useState<string | null>(null);
+  const [codeIslandDiagnosticSummary, setCodeIslandDiagnosticSummary] = useState<DiagnosticSummaryPayload>(null);
   const [lettaServerWarning, setLettaServerWarning] = useState<string | null>(null);
   const [connectionWarning, setConnectionWarning] = useState<string | null>(null);
+  const [runnerErrorContext, setRunnerErrorContext] = useState<RunnerErrorContext | null>(null);
+  const [globalErrorDiagnosticSummary, setGlobalErrorDiagnosticSummary] = useState<DiagnosticSummaryPayload>(null);
+  const [copyFeedback, setCopyFeedback] = useState<"code-island" | "global-error" | null>(null);
   const [configState, setConfigState] = useState<Awaited<ReturnType<Window["electron"]["getAppConfig"]>> | null>(null);
   const prevMessagesLengthRef = useRef(0);
   const scrollHeightBeforeLoadRef = useRef(0);
   const shouldRestoreScrollRef = useRef(false);
+  const copyFeedbackTimeoutRef = useRef<number | null>(null);
 
   const sessions = useAppStore((s) => s.sessions);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
@@ -99,6 +120,13 @@ function App() {
 
   // Event handler
   const onEvent = useCallback((event: ServerEvent) => {
+    if (event.type === "runner.error") {
+      setRunnerErrorContext({
+        message: event.payload.message,
+        traceId: event.payload.traceId,
+        sessionId: event.payload.sessionId,
+      });
+    }
     handleServerEvent(event);
     handlePartialMessages(event);
   }, [handleServerEvent, handlePartialMessages]);
@@ -146,6 +174,82 @@ function App() {
     };
   }, [setGlobalError]);
 
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimeoutRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!codeIslandWarningTraceId) {
+      setCodeIslandDiagnosticSummary(null);
+      return;
+    }
+
+    let cancelled = false;
+    window.electron.getDiagnosticSummary(codeIslandWarningTraceId)
+      .then((summary) => {
+        if (!cancelled) {
+          setCodeIslandDiagnosticSummary(summary);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCodeIslandDiagnosticSummary(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [codeIslandWarningTraceId]);
+
+  useEffect(() => {
+    if (!runnerErrorContext) {
+      setGlobalErrorDiagnosticSummary(null);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const summary = runnerErrorContext.traceId
+          ? await window.electron.getDiagnosticSummary(runnerErrorContext.traceId)
+          : runnerErrorContext.sessionId
+            ? await window.electron.getLatestDiagnosticSummaryForSession(runnerErrorContext.sessionId)
+            : null;
+        if (!cancelled) {
+          setGlobalErrorDiagnosticSummary(summary);
+        }
+      } catch {
+        if (!cancelled) {
+          setGlobalErrorDiagnosticSummary(null);
+        }
+      }
+    };
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runnerErrorContext]);
+
+  useEffect(() => {
+    if (!globalError) {
+      setRunnerErrorContext(null);
+      setGlobalErrorDiagnosticSummary(null);
+      return;
+    }
+
+    if (runnerErrorContext && runnerErrorContext.message !== globalError) {
+      setRunnerErrorContext(null);
+      setGlobalErrorDiagnosticSummary(null);
+    }
+  }, [globalError, runnerErrorContext]);
+
   // 启动时检查 API 配置
   useEffect(() => {
     if (connected && configState && !configState.requiresOnboarding) {
@@ -160,7 +264,9 @@ function App() {
       .then((staticData) => {
         if (cancelled) return;
 
-        setCodeIslandWarning(formatCodeIslandWarning(staticData));
+        const codeIslandDetails = getCodeIslandWarningDetails(staticData);
+        setCodeIslandWarning(codeIslandDetails.message);
+        setCodeIslandWarningTraceId(codeIslandDetails.traceId ?? null);
 
         const needsBundledServer = configState?.config.connectionType !== "letta-server";
 
@@ -188,6 +294,27 @@ function App() {
       cancelled = true;
     };
   }, [configState]);
+
+  const handleCopyDiagnostics = useCallback(async (
+    summary: DiagnosticSummaryPayload,
+    feedbackKey: "code-island" | "global-error",
+  ) => {
+    if (!summary) return;
+
+    try {
+      await navigator.clipboard.writeText(formatDiagnosticSummary(summary));
+      setCopyFeedback(feedbackKey);
+      if (copyFeedbackTimeoutRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimeoutRef.current);
+      }
+      copyFeedbackTimeoutRef.current = window.setTimeout(() => {
+        setCopyFeedback((current) => (current === feedbackKey ? null : current));
+        copyFeedbackTimeoutRef.current = null;
+      }, 1600);
+    } catch {
+      setGlobalError("Failed to copy diagnostics.");
+    }
+  }, [setGlobalError]);
 
   const handleConfigSaved = useCallback((nextConfigState: Awaited<ReturnType<Window["electron"]["getAppConfig"]>>) => {
     setConfigState(nextConfigState);
@@ -339,9 +466,21 @@ function App() {
           <div className="border-b border-warning/20 bg-warning-light px-6 py-3">
             <div className="mx-auto flex max-w-3xl items-center gap-3">
               <span className="text-sm font-medium text-warning">{codeIslandWarning}</span>
+              {codeIslandDiagnosticSummary && (
+                <button
+                  className="text-xs font-medium text-warning underline-offset-2 transition-colors hover:text-warning/80 hover:underline"
+                  onClick={() => void handleCopyDiagnostics(codeIslandDiagnosticSummary, "code-island")}
+                >
+                  {copyFeedback === "code-island" ? "Copied" : "Copy diagnostics"}
+                </button>
+              )}
               <button
                 className="ml-auto text-warning transition-colors hover:text-warning/80"
-                onClick={() => setCodeIslandWarning(null)}
+                onClick={() => {
+                  setCodeIslandWarning(null);
+                  setCodeIslandWarningTraceId(null);
+                  setCodeIslandDiagnosticSummary(null);
+                }}
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M18 6L6 18M6 6l12 12" />
@@ -488,7 +627,22 @@ function App() {
         <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-error/20 bg-error-light px-4 py-3 shadow-lg">
           <div className="flex items-center gap-3">
             <span className="text-sm text-error">{globalError}</span>
-            <button className="text-error hover:text-error/80" onClick={() => setGlobalError(null)}>
+            {globalErrorDiagnosticSummary && (
+              <button
+                className="text-xs font-medium text-error underline-offset-2 transition-colors hover:text-error/80 hover:underline"
+                onClick={() => void handleCopyDiagnostics(globalErrorDiagnosticSummary, "global-error")}
+              >
+                {copyFeedback === "global-error" ? "Copied" : "Copy diagnostics"}
+              </button>
+            )}
+            <button
+              className="text-error hover:text-error/80"
+              onClick={() => {
+                setGlobalError(null);
+                setRunnerErrorContext(null);
+                setGlobalErrorDiagnosticSummary(null);
+              }}
+            >
               <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
             </button>
           </div>

@@ -1164,3 +1164,41 @@ cd /Users/jachi/Desktop/letta-workspace
 **始终从正确的工作区开始，先判断问题属于哪一层，再改对应的 repo，改完一定跑验收。**
 
 如果一直遵守这三件事，这个项目后面就不会再回到以前那种混乱状态。
+
+---
+
+## 19. Observability v1：怎么复制诊断信息
+
+现在桌面端已经有一套轻量诊断链路：
+
+- 关键链路会生成 `traceId`
+- 主进程会把结构化日志聚合成 compact diagnostics summary
+- 当 UI 里出现可诊断的 warning / error banner 时，会显示 `Copy diagnostics`
+
+当前这颗按钮主要会出现在：
+
+- CodeIsland 启动告警
+- session / runner 失败产生的全局错误提示
+
+复制出来的诊断文本会包含：
+
+- `summary`
+- `traceId`
+- `turnId`
+- `sessionId`
+- `errorCode`
+- `lastSuccessfulDecisionId`
+- `firstFailedDecisionId`
+- `suggestedAction`
+- 简短步骤列表：`component | decisionId | status | message`
+
+测试时如果你看到异常，不需要再手工长篇描述。
+优先点一次 `Copy diagnostics`，把那段文本直接发给模型，就能明显减少排障时重新全仓扫描的成本。
+
+### 当前限制
+
+这套 `v1` 仍然有边界：
+
+- diagnostics 目前是内存态，应用重启后不会保留
+- 现在只接入了最关键的两个 banner，还没有单独 diagnostics 页面
+- 测试输出里仍会看到结构化日志打印，这不影响功能，但后面可以继续收敛

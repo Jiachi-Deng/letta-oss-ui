@@ -2,6 +2,21 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import electron from "electron";
+import {
+  E_CODEISLAND_BUNDLE_MISSING,
+  E_CODEISLAND_LAUNCH_BLOCKED,
+  E_CODEISLAND_OS_UNSUPPORTED,
+} from "../../shared/error-codes.js";
+import {
+  CI_BOOT_001,
+  CI_BOOT_002,
+  CI_BOOT_003,
+  CI_BOOT_004,
+} from "../../shared/decision-ids.js";
+import {
+  createComponentLogger,
+  type TraceContext,
+} from "./trace.js";
 
 const CODEISLAND_APP_NAME = "CodeIsland.app";
 const CODEISLAND_EXECUTABLE_MATCH = "CodeIsland.app/Contents/MacOS/CodeIsland";
@@ -10,6 +25,7 @@ const CODEISLAND_MONITOR_INTERVAL_MS = 5000;
 const CODEISLAND_LAUNCH_VERIFY_DELAY_MS = 1200;
 const CODEISLAND_MINIMUM_MACOS_MAJOR = 14;
 const { app } = electron;
+const codeIslandLog = createComponentLogger("bundled-codeisland");
 
 type CodeIslandResolutionSource = "bundled" | "dev-build" | "applications";
 type CodeIslandStartupStatus =
@@ -50,11 +66,16 @@ export type CodeIslandMonitorHandle = {
   stop: () => void;
 };
 
+type CodeIslandObservabilityOptions = {
+  trace?: TraceContext;
+};
+
 export type CodeIslandRuntimeStatus = {
   platformSupported: boolean;
   available: boolean;
   status: CodeIslandStartupStatus;
   running: boolean;
+  traceId?: string;
   resolution?: CodeIslandAppResolution;
   minimumMacOSVersion?: string;
   systemVersion?: string;
@@ -68,6 +89,20 @@ let latestRuntimeStatus: CodeIslandRuntimeStatus = {
   status: process.platform === "darwin" ? "missing" : "unsupported",
   running: false,
 };
+
+function logCodeIslandEvent(
+  trace: TraceContext | undefined,
+  input: Parameters<typeof codeIslandLog>[0],
+): void {
+  if (!trace) return;
+
+  codeIslandLog({
+    ...input,
+    trace_id: trace.traceId,
+    turn_id: trace.turnId,
+    session_id: trace.sessionId,
+  });
+}
 
 function readMacOSSystemVersion(): string | undefined {
   if (process.platform !== "darwin") return undefined;
@@ -239,8 +274,11 @@ export function resolveCodeIslandApp(context: CodeIslandRuntimeContext = getRunt
 }
 
 function setLatestRuntimeStatus(status: CodeIslandRuntimeStatus): CodeIslandRuntimeStatus {
-  latestRuntimeStatus = status;
-  return status;
+  latestRuntimeStatus = {
+    ...status,
+    traceId: status.traceId ?? latestRuntimeStatus.traceId,
+  };
+  return latestRuntimeStatus;
 }
 
 function buildUnsupportedRuntimeStatus(context: CodeIslandRuntimeContext): CodeIslandRuntimeStatus {
@@ -249,6 +287,7 @@ function buildUnsupportedRuntimeStatus(context: CodeIslandRuntimeContext): CodeI
     available: false,
     status: "unsupported",
     running: false,
+    traceId: latestRuntimeStatus.traceId,
     minimumMacOSVersion: getMinimumMacOSVersionLabel(),
     systemVersion: context.systemVersion,
     diagnostic: buildUnsupportedDiagnostic(context),
@@ -261,6 +300,7 @@ function buildMissingRuntimeStatus(context: CodeIslandRuntimeContext): CodeIslan
     available: false,
     status: "missing",
     running: false,
+    traceId: latestRuntimeStatus.traceId,
     minimumMacOSVersion: getMinimumMacOSVersionLabel(),
     systemVersion: context.systemVersion,
     diagnostic: buildMissingDiagnostic(),
@@ -291,6 +331,7 @@ function verifyRunningAndSetFailure(
   context: CodeIslandRuntimeContext,
   status: CodeIslandStartupStatus,
   lastError?: string,
+  trace?: TraceContext,
 ): CodeIslandStartupResult {
   const diagnostic = buildLaunchFailureDiagnostic(resolution.appPath, lastError);
   setLatestRuntimeStatus({
@@ -298,6 +339,7 @@ function verifyRunningAndSetFailure(
     available: true,
     status,
     running: false,
+    traceId: trace?.traceId,
     resolution,
     minimumMacOSVersion: getMinimumMacOSVersionLabel(),
     systemVersion: context.systemVersion,
@@ -309,14 +351,41 @@ function verifyRunningAndSetFailure(
 
 export function getCodeIslandRuntimeStatus(
   context: CodeIslandRuntimeContext = getRuntimeContext(),
+  observability: CodeIslandObservabilityOptions = {},
 ): CodeIslandRuntimeStatus {
   if (!isCodeIslandPlatformSupported(context)) {
-    return setLatestRuntimeStatus(buildUnsupportedRuntimeStatus(context));
+    logCodeIslandEvent(observability.trace, {
+      level: "warn",
+      message: "CodeIsland platform check failed",
+      decision_id: CI_BOOT_002,
+      error_code: E_CODEISLAND_OS_UNSUPPORTED,
+      data: {
+        platform: context.platform,
+        systemVersion: context.systemVersion,
+      },
+    });
+    return setLatestRuntimeStatus({
+      ...buildUnsupportedRuntimeStatus(context),
+      traceId: observability.trace?.traceId,
+    });
   }
 
   const resolution = resolveCodeIslandApp(context);
   if (!resolution) {
-    return setLatestRuntimeStatus(buildMissingRuntimeStatus(context));
+    logCodeIslandEvent(observability.trace, {
+      level: "warn",
+      message: "CodeIsland bundle could not be resolved",
+      decision_id: CI_BOOT_001,
+      error_code: E_CODEISLAND_BUNDLE_MISSING,
+      data: {
+        resourcesPath: context.resourcesPath,
+        isPackaged: context.isPackaged,
+      },
+    });
+    return setLatestRuntimeStatus({
+      ...buildMissingRuntimeStatus(context),
+      traceId: observability.trace?.traceId,
+    });
   }
 
   const running = isCodeIslandRunning(context.platform);
@@ -325,6 +394,7 @@ export function getCodeIslandRuntimeStatus(
     available: true,
     status: running ? "already-running" : latestRuntimeStatus.status === "failed" ? "failed" : "missing",
     running,
+    traceId: observability.trace?.traceId,
     resolution,
     minimumMacOSVersion: getMinimumMacOSVersionLabel(),
     systemVersion: context.systemVersion,
@@ -333,25 +403,82 @@ export function getCodeIslandRuntimeStatus(
   });
 }
 
-export function ensureCodeIslandStarted(context: CodeIslandRuntimeContext = getRuntimeContext()): CodeIslandStartupResult {
+export function ensureCodeIslandStarted(
+  context: CodeIslandRuntimeContext = getRuntimeContext(),
+  observability: CodeIslandObservabilityOptions = {},
+): CodeIslandStartupResult {
+  logCodeIslandEvent(observability.trace, {
+    level: "info",
+    message: "CodeIsland platform check started",
+    decision_id: CI_BOOT_002,
+    data: {
+      platform: context.platform,
+      systemVersion: context.systemVersion,
+      minimumMacOSVersion: getMinimumMacOSVersionLabel(),
+    },
+  });
+
   if (!isCodeIslandPlatformSupported(context)) {
-    setLatestRuntimeStatus(buildUnsupportedRuntimeStatus(context));
+    logCodeIslandEvent(observability.trace, {
+      level: "warn",
+      message: "CodeIsland platform check failed",
+      decision_id: CI_BOOT_002,
+      error_code: E_CODEISLAND_OS_UNSUPPORTED,
+      data: {
+        platform: context.platform,
+        systemVersion: context.systemVersion,
+      },
+    });
+    setLatestRuntimeStatus({
+      ...buildUnsupportedRuntimeStatus(context),
+      traceId: observability.trace?.traceId,
+    });
     return { status: "unsupported" };
   }
 
   const resolution = resolveCodeIslandApp(context);
+  logCodeIslandEvent(observability.trace, {
+    level: resolution ? "info" : "warn",
+    message: resolution
+      ? "CodeIsland bundle resolved"
+      : "CodeIsland bundle could not be resolved",
+    decision_id: CI_BOOT_001,
+    error_code: resolution ? undefined : E_CODEISLAND_BUNDLE_MISSING,
+    data: resolution
+      ? {
+          appPath: resolution.appPath,
+          source: resolution.source,
+        }
+      : {
+          resourcesPath: context.resourcesPath,
+          isPackaged: context.isPackaged,
+        },
+  });
 
   if (!resolution) {
-    setLatestRuntimeStatus(buildMissingRuntimeStatus(context));
+    setLatestRuntimeStatus({
+      ...buildMissingRuntimeStatus(context),
+      traceId: observability.trace?.traceId,
+    });
     return { status: "missing" };
   }
 
   if (isCodeIslandRunning(context.platform)) {
+    logCodeIslandEvent(observability.trace, {
+      level: "info",
+      message: "CodeIsland already running; skipping launch",
+      decision_id: CI_BOOT_003,
+      data: {
+        appPath: resolution.appPath,
+        source: resolution.source,
+      },
+    });
     setLatestRuntimeStatus({
       platformSupported: true,
       available: true,
       status: "already-running",
       running: true,
+      traceId: observability.trace?.traceId,
       resolution,
       minimumMacOSVersion: getMinimumMacOSVersionLabel(),
       systemVersion: context.systemVersion,
@@ -362,6 +489,15 @@ export function ensureCodeIslandStarted(context: CodeIslandRuntimeContext = getR
     };
   }
 
+  logCodeIslandEvent(observability.trace, {
+    level: "info",
+    message: "Launching CodeIsland via open command",
+    decision_id: CI_BOOT_003,
+    data: {
+      appPath: resolution.appPath,
+      source: resolution.source,
+    },
+  });
   const launchResult = spawnSync("open", [resolution.appPath], {
     encoding: "utf8",
     stdio: "pipe",
@@ -373,20 +509,65 @@ export function ensureCodeIslandStarted(context: CodeIslandRuntimeContext = getR
       : undefined);
 
   if (launchError) {
-    return verifyRunningAndSetFailure(resolution, context, "failed", launchError);
+    logCodeIslandEvent(observability.trace, {
+      level: "error",
+      message: "CodeIsland launch command failed",
+      decision_id: CI_BOOT_003,
+      error_code: E_CODEISLAND_LAUNCH_BLOCKED,
+      data: {
+        appPath: resolution.appPath,
+        source: resolution.source,
+        error: launchError,
+      },
+    });
+    return verifyRunningAndSetFailure(
+      resolution,
+      context,
+      "failed",
+      launchError,
+      observability.trace,
+    );
   }
 
   sleep(CODEISLAND_LAUNCH_VERIFY_DELAY_MS);
 
   if (!isCodeIslandRunning(context.platform)) {
-    return verifyRunningAndSetFailure(resolution, context, "failed");
+    logCodeIslandEvent(observability.trace, {
+      level: "warn",
+      message: "CodeIsland failed launch verification",
+      decision_id: CI_BOOT_004,
+      error_code: E_CODEISLAND_LAUNCH_BLOCKED,
+      data: {
+        appPath: resolution.appPath,
+        source: resolution.source,
+        verifyDelayMs: CODEISLAND_LAUNCH_VERIFY_DELAY_MS,
+      },
+    });
+    return verifyRunningAndSetFailure(
+      resolution,
+      context,
+      "failed",
+      undefined,
+      observability.trace,
+    );
   }
 
+  logCodeIslandEvent(observability.trace, {
+    level: "info",
+    message: "CodeIsland launch verified",
+    decision_id: CI_BOOT_004,
+    data: {
+      appPath: resolution.appPath,
+      source: resolution.source,
+      verifyDelayMs: CODEISLAND_LAUNCH_VERIFY_DELAY_MS,
+    },
+  });
   setLatestRuntimeStatus({
     platformSupported: true,
     available: true,
     status: "launched",
     running: true,
+    traceId: observability.trace?.traceId,
     resolution,
     minimumMacOSVersion: getMinimumMacOSVersionLabel(),
     systemVersion: context.systemVersion,
@@ -400,9 +581,13 @@ export function ensureCodeIslandStarted(context: CodeIslandRuntimeContext = getR
 
 export function startCodeIslandMonitor(
   context: CodeIslandRuntimeContext = getRuntimeContext(),
+  observability: CodeIslandObservabilityOptions = {},
 ): CodeIslandMonitorHandle {
   if (!isCodeIslandPlatformSupported(context)) {
-    setLatestRuntimeStatus(buildUnsupportedRuntimeStatus(context));
+    setLatestRuntimeStatus({
+      ...buildUnsupportedRuntimeStatus(context),
+      traceId: observability.trace?.traceId,
+    });
     return {
       stop: () => {},
     };
@@ -412,7 +597,10 @@ export function startCodeIslandMonitor(
     const resolution = resolveCodeIslandApp(context);
 
     if (!resolution) {
-      setLatestRuntimeStatus(buildMissingRuntimeStatus(context));
+      setLatestRuntimeStatus({
+        ...buildMissingRuntimeStatus(context),
+        traceId: observability.trace?.traceId,
+      });
       return;
     }
 
@@ -422,6 +610,7 @@ export function startCodeIslandMonitor(
         available: true,
         status: "already-running",
         running: true,
+        traceId: observability.trace?.traceId,
         resolution,
         minimumMacOSVersion: getMinimumMacOSVersionLabel(),
         systemVersion: context.systemVersion,
@@ -430,7 +619,7 @@ export function startCodeIslandMonitor(
     }
 
     console.warn(`[codeisland] CodeIsland is not running. Restarting ${resolution.appPath}`);
-    const restartResult = ensureCodeIslandStarted(context);
+    const restartResult = ensureCodeIslandStarted(context, observability);
 
     if (restartResult.status === "launched" || restartResult.status === "already-running") {
       setLatestRuntimeStatus({
@@ -438,6 +627,7 @@ export function startCodeIslandMonitor(
         available: true,
         status: "restarted",
         running: true,
+        traceId: observability.trace?.traceId,
         resolution,
         minimumMacOSVersion: getMinimumMacOSVersionLabel(),
         systemVersion: context.systemVersion,

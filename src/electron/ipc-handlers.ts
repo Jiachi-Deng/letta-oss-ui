@@ -21,23 +21,50 @@ import {
   rekeySessionProjection,
   updateSessionProjection,
 } from "./libs/runtime-state.js";
+import {
+  createComponentLogger,
+  createTraceContext,
+  createTurnId,
+  type TraceContext,
+} from "./libs/trace.js";
+import {
+  IPC_CONTINUE_001,
+  IPC_START_001,
+} from "../shared/decision-ids.js";
 
 const DEBUG = process.env.DEBUG_IPC === "true";
+const ipcLog = createComponentLogger("ipc");
 
-// Simple logger for IPC handlers
-const log = (msg: string, data?: Record<string, unknown>) => {
-  const timestamp = new Date().toISOString();
-  if (data) {
-    console.log(`[${timestamp}] [ipc] ${msg}`, JSON.stringify(data, null, 2));
-  } else {
-    console.log(`[${timestamp}] [ipc] ${msg}`);
-  }
+const log = (
+  msg: string,
+  data?: Record<string, unknown>,
+  context?: TraceContext,
+) => {
+  ipcLog({
+    level: "info",
+    message: msg,
+    data,
+    trace_id: context?.traceId,
+    turn_id: context?.turnId,
+    session_id: context?.sessionId,
+  });
 };
 
 // Debug-only logging (verbose)
-const debug = (msg: string, data?: Record<string, unknown>) => {
+const debug = (
+  msg: string,
+  data?: Record<string, unknown>,
+  context?: TraceContext,
+) => {
   if (!DEBUG) return;
-  log(msg, data);
+  ipcLog({
+    level: "debug",
+    message: msg,
+    data,
+    trace_id: context?.traceId,
+    turn_id: context?.turnId,
+    session_id: context?.sessionId,
+  });
 };
 
 // Track active runner handles.
@@ -119,14 +146,33 @@ export async function handleClientEvent(event: ClientEvent) {
   }
 
   if (event.type === "session.start") {
-    debug("session.start: starting new session", { prompt: event.payload.prompt.slice(0, 50), cwd: event.payload.cwd });
+    const traceContext = createTraceContext({ turnId: createTurnId() });
+
+    ipcLog({
+      level: "info",
+      message: "session.start: boundary entered",
+      decision_id: IPC_START_001,
+      trace_id: traceContext.traceId,
+      turn_id: traceContext.turnId,
+      data: {
+        cwd: event.payload.cwd,
+        hasTitle: Boolean(event.payload.title),
+        promptLength: event.payload.prompt.length,
+      },
+    });
+
+    debug(
+      "session.start: starting new session",
+      { prompt: event.payload.prompt.slice(0, 50), cwd: event.payload.cwd },
+      traceContext,
+    );
     const pendingPermissions = new Map<string, PendingPermission>();
 
     try {
       let conversationId: string | null = null;
       let handle: RunnerHandle | null = null;
       
-      debug("session.start: calling runLetta");
+      debug("session.start: calling runLetta", undefined, traceContext);
       handle = await runLetta({
         prompt: event.payload.prompt,
         session: {
@@ -136,6 +182,7 @@ export async function handleClientEvent(event: ClientEvent) {
           cwd: event.payload.cwd,
           pendingPermissions,
         },
+        trace: traceContext,
         onEvent: (e) => {
           // Use conversationId for all events
           if (conversationId && "sessionId" in e.payload) {
@@ -146,10 +193,10 @@ export async function handleClientEvent(event: ClientEvent) {
         },
         onSessionUpdate: (updates) => {
           // Called when session is initialized with conversationId
-          debug("session.start: onSessionUpdate called", { updates });
+          debug("session.start: onSessionUpdate called", { updates }, traceContext);
           if (updates.lettaConversationId && !conversationId) {
             conversationId = updates.lettaConversationId;
-            debug("session.start: session initialized", { conversationId });
+            debug("session.start: session initialized", { conversationId }, traceContext);
             
             createSessionProjection(conversationId, {
               title: event.payload.title || conversationId,
@@ -171,13 +218,17 @@ export async function handleClientEvent(event: ClientEvent) {
           }
         },
       });
-      debug("session.start: runLetta returned handle");
+      debug("session.start: runLetta returned handle", undefined, traceContext);
     } catch (error) {
-      log("session.start: ERROR", { error: String(error) });
+      log("session.start: ERROR", { error: String(error) }, traceContext);
       console.error("Failed to start session:", error);
       emit({
         type: "runner.error",
-        payload: { message: String(error) },
+        payload: {
+          message: String(error),
+          traceId: traceContext.traceId,
+          sessionId: traceContext.sessionId,
+        },
       });
     }
     return;
@@ -185,7 +236,29 @@ export async function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "session.continue") {
     const conversationId = event.payload.sessionId;
-    debug("session.continue: continuing session", { conversationId, prompt: event.payload.prompt.slice(0, 50) });
+    const traceContext = createTraceContext({
+      turnId: createTurnId(),
+      sessionId: conversationId,
+    });
+
+    ipcLog({
+      level: "info",
+      message: "session.continue: boundary entered",
+      decision_id: IPC_CONTINUE_001,
+      trace_id: traceContext.traceId,
+      turn_id: traceContext.turnId,
+      session_id: traceContext.sessionId,
+      data: {
+        cwd: event.payload.cwd,
+        promptLength: event.payload.prompt.length,
+      },
+    });
+
+    debug(
+      "session.continue: continuing session",
+      { conversationId, prompt: event.payload.prompt.slice(0, 50) },
+      traceContext,
+    );
 
     if (isConversationTurnActive(conversationId)) {
       emit({
@@ -202,13 +275,13 @@ export async function handleClientEvent(event: ClientEvent) {
     let runtimeSession = getSessionProjection(conversationId);
     
     if (!runtimeSession) {
-      debug("session.continue: no runtime session found, creating new one");
+      debug("session.continue: no runtime session found, creating new one", undefined, traceContext);
       runtimeSession = createSessionProjection(conversationId, {
         title: conversationId,
         cwd: event.payload.cwd,
       });
     } else {
-      debug("session.continue: found existing runtime session", { status: runtimeSession.status });
+      debug("session.continue: found existing runtime session", { status: runtimeSession.status }, traceContext);
     }
 
     updateSessionProjection(conversationId, { status: "running" });
@@ -223,7 +296,7 @@ export async function handleClientEvent(event: ClientEvent) {
     });
 
     try {
-      debug("session.continue: calling runLetta", { conversationId });
+      debug("session.continue: calling runLetta", { conversationId }, traceContext);
       let actualConversationId = conversationId;
       let handle: RunnerHandle | null = null;
       
@@ -237,6 +310,7 @@ export async function handleClientEvent(event: ClientEvent) {
           pendingPermissions: runtimeSession.pendingPermissions,
         },
         resumeConversationId: conversationId,
+        trace: traceContext,
         onEvent: (e) => {
           // Update sessionId in events if we got a new conversationId
           if (actualConversationId !== conversationId && "sessionId" in e.payload) {
@@ -248,10 +322,14 @@ export async function handleClientEvent(event: ClientEvent) {
         onSessionUpdate: (updates) => {
           // If we get a new conversationId (e.g., fallback from invalid ID), update everything
           if (updates.lettaConversationId && updates.lettaConversationId !== conversationId) {
-            log("session.continue: received new conversationId from runner", { 
-              old: conversationId, 
-              new: updates.lettaConversationId 
-            });
+            log(
+              "session.continue: received new conversationId from runner",
+              {
+                old: conversationId,
+                new: updates.lettaConversationId,
+              },
+              traceContext,
+            );
             actualConversationId = updates.lettaConversationId;
             
             rekeySessionProjection(conversationId, actualConversationId, {
@@ -285,10 +363,10 @@ export async function handleClientEvent(event: ClientEvent) {
           }
         },
       });
-      debug("session.continue: runLetta returned handle");
+      debug("session.continue: runLetta returned handle", undefined, traceContext);
       runnerHandles.set(actualConversationId, handle);
     } catch (error) {
-      log("session.continue: ERROR", { error: String(error) });
+      log("session.continue: ERROR", { error: String(error) }, traceContext);
       updateSessionProjection(conversationId, { status: "error" });
       emit({
         type: "session.status",

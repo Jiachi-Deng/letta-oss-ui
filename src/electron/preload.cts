@@ -28,6 +28,10 @@ electron.contextBridge.exposeInMainWorld("electron", {
         ipcInvoke("get-recent-cwds", limit),
     getAppConfig: () =>
         ipcInvoke("get-app-config"),
+    getDiagnosticSummary: (traceId: string) =>
+        ipcInvoke("get-diagnostic-summary", traceId),
+    getLatestDiagnosticSummaryForSession: (sessionId: string) =>
+        ipcInvoke("get-latest-diagnostic-summary-for-session", sessionId),
     saveAppConfig: (config: {
         connectionType?: "letta-server" | "anthropic-compatible" | "openai-compatible";
         LETTA_BASE_URL?: string;

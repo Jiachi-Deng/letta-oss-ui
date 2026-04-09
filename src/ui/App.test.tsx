@@ -45,11 +45,15 @@ describe("App", () => {
 	let serverEventHandler: ((event: ServerEvent) => void) | null;
 	let sendClientEventMock: ReturnType<typeof vi.fn>;
 	let getStaticDataMock: ReturnType<typeof vi.fn>;
+	let getDiagnosticSummaryMock: ReturnType<typeof vi.fn>;
+	let getLatestDiagnosticSummaryForSessionMock: ReturnType<typeof vi.fn>;
 
 	beforeEach(() => {
 		resetAppStore();
 		serverEventHandler = null;
 		sendClientEventMock = vi.fn();
+		getDiagnosticSummaryMock = vi.fn().mockResolvedValue(null);
+		getLatestDiagnosticSummaryForSessionMock = vi.fn().mockResolvedValue(null);
 		getStaticDataMock = vi.fn().mockResolvedValue({
 			totalStorage: 512,
 			cpuModel: "Apple M3",
@@ -75,6 +79,8 @@ describe("App", () => {
 					requiresOnboarding: false,
 				}),
 				getStaticData: getStaticDataMock,
+				getDiagnosticSummary: getDiagnosticSummaryMock,
+				getLatestDiagnosticSummaryForSession: getLatestDiagnosticSummaryForSessionMock,
 				getRecentCwds: vi.fn().mockResolvedValue([]),
 				selectDirectory: vi.fn().mockResolvedValue(null),
 				saveAppConfig: vi.fn(),
@@ -159,6 +165,29 @@ describe("App", () => {
 	});
 
 	it("shows first-launch security guidance when CodeIsland launch verification fails", async () => {
+		getDiagnosticSummaryMock.mockResolvedValue({
+			traceId: "trc_codeisland",
+			summary: "Trace failed at CI_BOOT_004 after CI_BOOT_003.",
+			errorCode: "E_CODEISLAND_LAUNCH_BLOCKED",
+			lastSuccessfulDecisionId: "CI_BOOT_003",
+			firstFailedDecisionId: "CI_BOOT_004",
+			suggestedAction: "Open the nested CodeIsland.app once and approve it in System Settings > Privacy & Security, then relaunch Letta.",
+			steps: [
+				{
+					component: "bundled-codeisland",
+					decisionId: "CI_BOOT_003",
+					status: "ok",
+					message: "Launching CodeIsland via open command",
+				},
+				{
+					component: "bundled-codeisland",
+					decisionId: "CI_BOOT_004",
+					status: "error",
+					message: "CodeIsland failed launch verification",
+					errorCode: "E_CODEISLAND_LAUNCH_BLOCKED",
+				},
+			],
+		});
 		getStaticDataMock.mockResolvedValue({
 			totalStorage: 512,
 			cpuModel: "Apple M3",
@@ -177,6 +206,7 @@ describe("App", () => {
 					summary: "CodeIsland was found but macOS appears to be blocking its first launch.",
 					action: "Open \"/Applications/Letta.app/Contents/Resources/CodeIsland.app\" once in Finder or run 'open \"/Applications/Letta.app/Contents/Resources/CodeIsland.app\"', approve any macOS security prompt in System Settings > Privacy & Security, then relaunch Letta.",
 				},
+				traceId: "trc_codeisland",
 			},
 		});
 
@@ -184,10 +214,78 @@ describe("App", () => {
 
 		expect(await screen.findByText(/macOS appears to be blocking its first launch/)).toBeInTheDocument();
 		expect(screen.getByText(/Privacy & Security/)).toBeInTheDocument();
+		expect(await screen.findByRole("button", { name: "Copy diagnostics" })).toBeInTheDocument();
+	});
+
+	it("copies CodeIsland diagnostics from the warning banner", async () => {
+		const user = userEvent.setup();
+		getDiagnosticSummaryMock.mockResolvedValue({
+			traceId: "trc_codeisland_copy",
+			turnId: "turn_codeisland_copy",
+			summary: "Trace failed at CI_BOOT_004 after CI_BOOT_003.",
+			errorCode: "E_CODEISLAND_LAUNCH_BLOCKED",
+			lastSuccessfulDecisionId: "CI_BOOT_003",
+			firstFailedDecisionId: "CI_BOOT_004",
+			suggestedAction: "Open the nested CodeIsland.app once and approve it in System Settings > Privacy & Security, then relaunch Letta.",
+			steps: [
+				{
+					component: "bundled-codeisland",
+					decisionId: "CI_BOOT_004",
+					status: "error",
+					message: "CodeIsland failed launch verification",
+					errorCode: "E_CODEISLAND_LAUNCH_BLOCKED",
+				},
+			],
+		});
+		getStaticDataMock.mockResolvedValue({
+			totalStorage: 512,
+			cpuModel: "Apple M3",
+			totalMemoryGB: 18,
+			codeIsland: {
+				platformSupported: true,
+				available: true,
+				status: "failed",
+				running: false,
+				traceId: "trc_codeisland_copy",
+				diagnostic: {
+					code: "launch-verification-failed",
+					summary: "CodeIsland was found but macOS appears to be blocking its first launch.",
+				},
+			},
+		});
+
+		render(<App />);
+
+		await user.click(await screen.findByRole("button", { name: "Copy diagnostics" }));
+
+		expect(getDiagnosticSummaryMock).toHaveBeenCalledWith("trc_codeisland_copy");
+		await waitFor(async () => {
+			await expect(navigator.clipboard.readText()).resolves.toContain("Trace ID: trc_codeisland_copy");
+		});
+		await expect(navigator.clipboard.readText()).resolves.toContain("First Failed Decision: CI_BOOT_004");
+		expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
 	});
 
 	it("recovers from start failure without leaving pending start stuck", async () => {
 		const user = userEvent.setup();
+		getDiagnosticSummaryMock.mockResolvedValue({
+			traceId: "trc_runner_error",
+			turnId: "turn_runner_error",
+			summary: "Trace failed at BOOT_CONN_002 after RUNNER_INIT_001.",
+			errorCode: "E_PROVIDER_CONNECT_FAILED",
+			lastSuccessfulDecisionId: "RUNNER_INIT_001",
+			firstFailedDecisionId: "BOOT_CONN_002",
+			suggestedAction: "Inspect the provider base URL, API key, and letta connect CLI stderr for the failed registration step.",
+			steps: [
+				{
+					component: "provider-bootstrap",
+					decisionId: "BOOT_CONN_002",
+					status: "error",
+					message: "runtime connection bootstrap failed during compatible provider registration",
+					errorCode: "E_PROVIDER_CONNECT_FAILED",
+				},
+			],
+		});
 		render(<App />);
 
 		await waitFor(() => {
@@ -220,16 +318,41 @@ describe("App", () => {
 
 		emitServerEvent({
 			type: "runner.error",
-			payload: { message: "Compatible bootstrap failed" },
+			payload: { message: "Compatible bootstrap failed", traceId: "trc_runner_error" },
 		});
 
 		await waitFor(() => {
 			expect(screen.getByText("Compatible bootstrap failed")).toBeInTheDocument();
 		});
+		expect(getDiagnosticSummaryMock).toHaveBeenCalledWith("trc_runner_error");
+		expect(await screen.findByRole("button", { name: "Copy diagnostics" })).toBeInTheDocument();
 		expect(
 			screen.getAllByDisplayValue("Investigate compatible bootstrap failure"),
 		).toHaveLength(2);
 		expect(startButton).toBeEnabled();
+	});
+
+	it("falls back to latest session diagnostics when runner.error has no trace id", async () => {
+		getLatestDiagnosticSummaryForSessionMock.mockResolvedValue({
+			traceId: "trc_session_latest",
+			sessionId: "conv_session_latest",
+			summary: "Trace failed at RUNNER_INIT_002 after IPC_CONTINUE_001.",
+			errorCode: "E_SESSION_CONVERSATION_ID_MISSING",
+			lastSuccessfulDecisionId: "IPC_CONTINUE_001",
+			firstFailedDecisionId: "RUNNER_INIT_002",
+			steps: [],
+		});
+
+		render(<App />);
+		emitServerEvent({
+			type: "runner.error",
+			payload: { message: "Conversation id missing", sessionId: "conv_session_latest" },
+		});
+
+		await waitFor(() => {
+			expect(getLatestDiagnosticSummaryForSessionMock).toHaveBeenCalledWith("conv_session_latest");
+		});
+		expect(await screen.findByRole("button", { name: "Copy diagnostics" })).toBeInTheDocument();
 	});
 
 	it("starts a new session from the modal and activates the session UI", async () => {

@@ -12,6 +12,7 @@ import {
   type CodeIslandMonitorHandle,
 } from "./bundled-codeisland.js";
 import { initializeAppConfig } from "./config.js";
+import { createTraceContext, createTurnId } from "./trace.js";
 
 const PRODUCT_NAME = "Letta";
 const APP_ID = "com.jachi.letta";
@@ -90,8 +91,13 @@ export function startElectronRuntimeServices(): ElectronRuntimeServices {
       console.error("[letta-server] Failed to start bundled server:", error);
     });
 
-  const codeIslandStartup = ensureCodeIslandStarted();
-  const codeIslandMonitor = startCodeIslandMonitor();
+  const codeIslandTrace = createTraceContext({ turnId: createTurnId() });
+  const codeIslandStartup = ensureCodeIslandStarted(undefined, {
+    trace: codeIslandTrace,
+  });
+  const codeIslandMonitor = startCodeIslandMonitor(undefined, {
+    trace: codeIslandTrace,
+  });
 
   if (codeIslandStartup.status === "launched" && codeIslandStartup.resolution) {
     console.log(

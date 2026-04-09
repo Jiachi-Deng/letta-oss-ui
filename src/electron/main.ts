@@ -9,6 +9,10 @@ import {
     getBundledLettaServerRuntimeStatus,
 } from "./libs/bundled-letta-server.js";
 import {
+    getDiagnosticSummary,
+    getLatestDiagnosticSummaryForSession,
+} from "./libs/diagnostics.js";
+import {
     getCodeIslandRuntimeStatus,
     type CodeIslandMonitorHandle,
 } from "./libs/bundled-codeisland.js";
@@ -91,6 +95,14 @@ app.on("ready", () => {
 
     ipcMainHandle("get-app-config", () => {
         return getAppConfigState();
+    });
+
+    ipcMainHandle("get-diagnostic-summary", (_event, traceId: string) => {
+        return getDiagnosticSummary(traceId);
+    });
+
+    ipcMainHandle("get-latest-diagnostic-summary-for-session", (_event, sessionId: string) => {
+        return getLatestDiagnosticSummaryForSession(sessionId);
     });
 
     ipcMainHandle("save-app-config", (_event, config) => {

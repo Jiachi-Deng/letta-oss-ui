@@ -7,6 +7,18 @@ import { app } from "electron";
 import type { ConnectionType, LettaAppConfig } from "./config.js";
 import { getCompatibleLettaServerUrl } from "./config.js";
 import { waitForBundledLettaServerReady } from "./bundled-letta-server.js";
+import {
+  E_LETTA_CLI_GLOBAL_SHADOWED,
+  E_PROVIDER_CONNECT_FAILED,
+} from "../../shared/error-codes.js";
+import {
+  BOOT_CONN_001,
+  BOOT_CONN_002,
+} from "../../shared/decision-ids.js";
+import {
+  createComponentLogger,
+  type TraceContext,
+} from "./trace.js";
 
 type SupportedProviderType = "anthropic" | "minimax" | "openai";
 
@@ -45,6 +57,7 @@ export type RuntimeConnectionInfo = {
 const LOCAL_SERVER_API_KEY = "local-dev-key";
 const require = createRequire(import.meta.url);
 const compatibleProviderCache = new Map<string, Promise<CompatibleProviderConfig>>();
+const providerLog = createComponentLogger("provider-bootstrap");
 
 function normalizeString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -122,9 +135,24 @@ function resolveLocalCliCandidates(): string[] {
   ];
 }
 
-export function resolveLettaCliPath(): string {
+export function resolveLettaCliPath(trace?: TraceContext): string {
   const explicitPath = normalizeString(process.env.LETTA_CLI_PATH);
   if (explicitPath && existsSync(explicitPath)) {
+    if (app.isPackaged && !explicitPath.startsWith(process.resourcesPath)) {
+      providerLog({
+        level: "warn",
+        message: "packaged runtime is resolving an external LETTA_CLI_PATH",
+        decision_id: BOOT_CONN_001,
+        error_code: E_LETTA_CLI_GLOBAL_SHADOWED,
+        trace_id: trace?.traceId,
+        turn_id: trace?.turnId,
+        session_id: trace?.sessionId,
+        data: {
+          cliPath: explicitPath,
+          resourcesPath: process.resourcesPath,
+        },
+      });
+    }
     return explicitPath;
   }
 
@@ -159,8 +187,9 @@ export function resolveLettaCliPath(): string {
 async function runLettaCli(
   args: string[],
   envOverrides: Record<string, string>,
+  trace?: TraceContext,
 ): Promise<void> {
-  const cliPath = resolveLettaCliPath();
+  const cliPath = resolveLettaCliPath(trace);
   const useElectronRuntime = Boolean(process.versions.electron);
   const command = useElectronRuntime ? process.execPath : "node";
 
@@ -210,6 +239,7 @@ async function runLettaCli(
 
 export async function ensureCompatibleProvider(
   config: LettaAppConfig,
+  trace?: TraceContext,
 ): Promise<CompatibleProviderConfig> {
   if (config.connectionType === "letta-server") {
     throw new Error(
@@ -258,6 +288,7 @@ export async function ensureCompatibleProvider(
       LETTA_BASE_URL: serverBaseUrl,
       LETTA_API_KEY: getCompatibleServerApiKey(),
     },
+    trace,
   ).then(() => compatibleProvider);
 
   compatibleProviderCache.set(cacheKey, registrationPromise);
@@ -290,8 +321,23 @@ function applyRuntimeConnectionEnv(connection: RuntimeConnectionInfo): void {
 
 export async function prepareRuntimeConnection(
   config: LettaAppConfig,
+  trace?: TraceContext,
 ): Promise<RuntimeConnectionInfo> {
-  const cliPath = resolveLettaCliPath();
+  providerLog({
+    level: "info",
+    message: "runtime connection bootstrap started",
+    decision_id: BOOT_CONN_001,
+    trace_id: trace?.traceId,
+    turn_id: trace?.turnId,
+    session_id: trace?.sessionId,
+    data: {
+      connectionType: config.connectionType,
+      baseUrl: normalizeUrl(config.LETTA_BASE_URL),
+      model: config.model,
+    },
+  });
+
+  const cliPath = resolveLettaCliPath(trace);
 
   if (config.connectionType === "letta-server") {
     const baseUrl = normalizeUrl(config.LETTA_BASE_URL);
@@ -305,27 +351,75 @@ export async function prepareRuntimeConnection(
     };
 
     applyRuntimeConnectionEnv(connection);
+    providerLog({
+      level: "info",
+      message: "runtime connection bootstrap resolved direct server mode",
+      decision_id: BOOT_CONN_002,
+      trace_id: trace?.traceId,
+      turn_id: trace?.turnId,
+      session_id: trace?.sessionId,
+      data: {
+        connectionType: config.connectionType,
+        baseUrl: connection.baseUrl,
+        cliPath,
+        bootstrapAction: connection.bootstrapAction.kind,
+      },
+    });
     return connection;
   }
 
-  const compatibleProvider = await ensureCompatibleProvider(config);
-  const connection: RuntimeConnectionInfo = {
-    baseUrl: compatibleProvider.serverBaseUrl,
-    apiKey: getCompatibleServerApiKey(),
-    modelHandle: compatibleProvider.modelHandle,
-    cliPath,
-    bootstrapAction: {
-      kind: "compatible-provider",
-      providerType: compatibleProvider.providerType,
-      providerName: compatibleProvider.providerName,
-      providerToken: compatibleProvider.providerToken,
-      providerBaseUrl: normalizeUrl(config.LETTA_BASE_URL),
-      serverBaseUrl: compatibleProvider.serverBaseUrl,
+  try {
+    const compatibleProvider = await ensureCompatibleProvider(config, trace);
+    const connection: RuntimeConnectionInfo = {
+      baseUrl: compatibleProvider.serverBaseUrl,
+      apiKey: getCompatibleServerApiKey(),
       modelHandle: compatibleProvider.modelHandle,
-      modelName: compatibleProvider.modelName,
-    },
-  };
+      cliPath,
+      bootstrapAction: {
+        kind: "compatible-provider",
+        providerType: compatibleProvider.providerType,
+        providerName: compatibleProvider.providerName,
+        providerToken: compatibleProvider.providerToken,
+        providerBaseUrl: normalizeUrl(config.LETTA_BASE_URL),
+        serverBaseUrl: compatibleProvider.serverBaseUrl,
+        modelHandle: compatibleProvider.modelHandle,
+        modelName: compatibleProvider.modelName,
+      },
+    };
 
-  applyRuntimeConnectionEnv(connection);
-  return connection;
+    applyRuntimeConnectionEnv(connection);
+    providerLog({
+      level: "info",
+      message: "runtime connection bootstrap resolved compatible provider mode",
+      decision_id: BOOT_CONN_002,
+      trace_id: trace?.traceId,
+      turn_id: trace?.turnId,
+      session_id: trace?.sessionId,
+      data: {
+        connectionType: config.connectionType,
+        providerType: compatibleProvider.providerType,
+        baseUrl: connection.baseUrl,
+        modelHandle: connection.modelHandle,
+        cliPath,
+      },
+    });
+    return connection;
+  } catch (error) {
+    providerLog({
+      level: "error",
+      message: "runtime connection bootstrap failed during compatible provider registration",
+      decision_id: BOOT_CONN_002,
+      error_code: E_PROVIDER_CONNECT_FAILED,
+      trace_id: trace?.traceId,
+      turn_id: trace?.turnId,
+      session_id: trace?.sessionId,
+      data: {
+        connectionType: config.connectionType,
+        baseUrl: normalizeUrl(config.LETTA_BASE_URL),
+        model: config.model,
+        error: String(error),
+      },
+    });
+    throw error;
+  }
 }
