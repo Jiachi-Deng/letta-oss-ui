@@ -25,7 +25,7 @@ These are the directories that matter most and should be treated as real source-
 | `/Users/jachi/Desktop/letta-archive/letta` | Python Letta server source package | Yes | Root `letta` repo contains server/backend code used for bundled local server |
 | `/Users/jachi/Desktop/letta-archive/letta-code` | Fork of `letta-code` | Yes | Local CLI/runtime fork with compatible provider changes |
 | `/Users/jachi/Desktop/letta-archive/code-island` | Fork of CodeIsland | Yes | Bundled notch companion app |
-| `/Users/jachi/Desktop/letta-archive/letta-code-sdk-local` | Local SDK fork | Yes, but should be minimized later | Small patched SDK fork used by desktop app |
+| `/Users/jachi/Desktop/letta-archive/letta-code-sdk-local` | Local SDK fork | Archived legacy only | Small patched SDK fork formerly used by desktop app before `vendor/letta-code-sdk` replaced it |
 
 ### Build/runtime/cache directories
 

@@ -29,6 +29,10 @@ Cloned the current working source repos into the new workspace without touching 
 - `/Users/jachi/Desktop/letta-workspace/vendor/code-island`
 - `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk-local`
 
+The legacy local SDK repo is now retired from active use and its GitHub mirror has been archived:
+
+- `https://github.com/Jiachi-Deng/letta-code-sdk-local`
+
 ### Phase 3: Path migration in the desktop app
 
 Updated the new desktop repo so it now prefers the new workspace layout:
