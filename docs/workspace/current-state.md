@@ -12,7 +12,8 @@ This document is a snapshot of the reorganized workspace after migration and cle
   - `/Users/jachi/Desktop/letta-workspace/vendor/letta-monorepo`
   - `/Users/jachi/Desktop/letta-workspace/vendor/letta-code`
   - `/Users/jachi/Desktop/letta-workspace/vendor/code-island`
-  - `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk-local`
+  - `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk`
+  - `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk-local` (legacy local patch repo, no longer active)
 - Runtime:
   - `/Users/jachi/Desktop/letta-workspace/runtime/python/venv`
 - Releases:
@@ -43,8 +44,8 @@ This document is a snapshot of the reorganized workspace after migration and cle
 - `vendor/code-island`
   - notch app source
 
-- `vendor/letta-code-sdk-local`
-  - small SDK patch layer
+- `vendor/letta-code-sdk`
+  - standard SDK fork with minimal Electron transport patch
 
 ## Current remote situation
 
@@ -64,8 +65,9 @@ Current remotes:
 - `vendor/code-island`
   - origin -> `https://github.com/Jiachi-Deng/CodeIsland.git`
   - upstream -> `https://github.com/wxtsky/CodeIsland.git`
-- `vendor/letta-code-sdk-local`
-  - origin -> `https://github.com/Jiachi-Deng/letta-code-sdk-local.git`
+- `vendor/letta-code-sdk`
+  - origin -> `https://github.com/Jiachi-Deng/letta-code-sdk.git`
+  - upstream -> `https://github.com/letta-ai/letta-code-sdk.git`
 
 The new workspace no longer depends on local-path `origin` remotes.
 
@@ -73,7 +75,7 @@ The new workspace no longer depends on local-path `origin` remotes.
 
 - `app/letta-desktop`
   - local `main` tracks `origin/main`
-- `vendor/letta-code-sdk-local`
+- `vendor/letta-code-sdk`
   - local `main` tracks `origin/main`
 - `vendor/letta-monorepo`
   - local `main` tracks `origin/main`
@@ -96,7 +98,7 @@ At the time of writing:
   - clean
 - `vendor/code-island`
   - clean
-- `vendor/letta-code-sdk-local`
+- `vendor/letta-code-sdk`
   - clean
 
 ## Size snapshot

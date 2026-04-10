@@ -41,8 +41,9 @@ This is the recommended maintenance flow for future updates.
   - session display
   - activation logic
 
-- Change `vendor/letta-code-sdk-local` only for:
-  - SDK path resolution or packaging glue
+- Change `vendor/letta-code-sdk` only for:
+  - SDK transport behavior
+  - packaged Electron runtime glue
 
 ## Important constraints
 

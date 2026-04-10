@@ -51,14 +51,14 @@ Owns:
 
 Touch this repo when the notch app or session display behavior needs changes.
 
-### `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk-local`
+### `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk`
 
 Owns:
 
-- small SDK patch layer
-- CLI path resolution behavior
+- Letta Code SDK fork
+- Electron transport compatibility patch
 
-Touch this repo only for SDK resolution / packaging glue changes.
+Touch this repo only for SDK-level transport / packaging glue changes.
 
 ## Runtime and releases
 
@@ -79,4 +79,4 @@ Touch this repo only for SDK resolution / packaging glue changes.
 2. Python server behavior issue: change `vendor/letta-monorepo`
 3. Node CLI behavior issue: change `vendor/letta-code`
 4. Notch / CodeIsland issue: change `vendor/code-island`
-5. SDK CLI lookup issue: change `vendor/letta-code-sdk-local`
+5. SDK transport / packaged runtime issue: change `vendor/letta-code-sdk`

@@ -146,18 +146,18 @@
 - Letta 状态显示不对
 - CodeIsland 动画、session 展示、激活逻辑有问题
 
-#### `vendor/letta-code-sdk-local`
+#### `vendor/letta-code-sdk`
 
 路径：
 
-- `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk-local`
+- `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk`
 
-这是一个很小的本地 SDK patch 仓库。
+这是 Letta Code SDK 的标准 fork。
 
 改它的时机：
 
-- SDK 的 CLI path resolution 有问题
-- 打包后的 SDK 找错 CLI
+- SDK transport 行为有问题
+- 打包后的 Electron runtime 启动 CLI 有问题
 - 它和 Electron 的 glue code 有问题
 
 如果不是这类问题，尽量不要先改这里。
@@ -420,7 +420,7 @@
 - 会话状态动画
 - 激活和自愈
 
-#### 去 `vendor/letta-code-sdk-local`
+#### 去 `vendor/letta-code-sdk`
 
 如果问题属于：
 
@@ -450,7 +450,7 @@
 - `vendor/letta-monorepo`
 - `vendor/letta-code`
 - `vendor/code-island`
-- `vendor/letta-code-sdk-local`
+- `vendor/letta-code-sdk`
 
 这是底层能力层。
 
@@ -770,7 +770,7 @@ cd /Users/jachi/Desktop/letta-workspace
 - `/Users/jachi/Desktop/letta-workspace/vendor/letta-monorepo`
 - `/Users/jachi/Desktop/letta-workspace/vendor/letta-code`
 - `/Users/jachi/Desktop/letta-workspace/vendor/code-island`
-- `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk-local`
+- `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk`
 
 ### 你该怎么理解它们
 
@@ -840,11 +840,12 @@ GitHub：
 
 本地：
 
-- `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk-local`
+- `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk`
 
 GitHub：
 
-- `origin = Jiachi-Deng/letta-code-sdk-local`
+- `origin = Jiachi-Deng/letta-code-sdk`
+- `upstream = letta-ai/letta-code-sdk`
 
 它没有标准官方 upstream，所以这里只有 `origin`。
 
