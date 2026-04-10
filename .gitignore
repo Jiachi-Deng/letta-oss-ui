@@ -27,9 +27,6 @@ build-resources
 
 .env
 
-# Package manager
-bun.lock
-
 # Letta
 .letta/
 openapi_*.json
