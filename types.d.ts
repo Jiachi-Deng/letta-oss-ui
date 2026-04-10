@@ -70,6 +70,13 @@ type StaticData = {
     };
 }
 
+type ResidentCoreTelegramStartupConfig = {
+    token?: string;
+    dmPolicy?: "pairing" | "allowlist" | "open";
+    streaming?: boolean;
+    workingDir?: string;
+}
+
 type AppConfigState = {
     mode: "development" | "packaged";
     source:
@@ -85,6 +92,9 @@ type AppConfigState = {
         LETTA_BASE_URL: string;
         LETTA_API_KEY?: string;
         model?: string;
+        residentCore?: {
+            telegram?: ResidentCoreTelegramStartupConfig | null;
+        };
     };
     canEdit: boolean;
     requiresOnboarding: boolean;
@@ -122,6 +132,9 @@ interface Window {
             LETTA_BASE_URL?: string;
             LETTA_API_KEY?: string;
             model?: string;
+            residentCore?: {
+                telegram?: ResidentCoreTelegramStartupConfig | null;
+            };
         }) => Promise<AppConfigState>;
         selectDirectory: () => Promise<string | null>;
     }

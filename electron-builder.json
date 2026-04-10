@@ -7,8 +7,8 @@
     ],
     "extraResources": [
         {
-            "from": "dist-electron/preload.cjs",
-            "to": "dist-electron/preload.cjs"
+            "from": "dist-electron/electron/preload.cjs",
+            "to": "dist-electron/electron/preload.cjs"
         },
         {
             "from": "templateIcon.png",

@@ -1,4 +1,6 @@
 import electron from "electron";
+import type { ResidentCoreTelegramStartupConfig } from "./libs/config.js";
+import type { ClientEvent, ServerEvent } from "./types.js";
 
 electron.contextBridge.exposeInMainWorld("electron", {
     subscribeStatistics: (callback) =>
@@ -8,13 +10,13 @@ electron.contextBridge.exposeInMainWorld("electron", {
     getStaticData: () => ipcInvoke("getStaticData"),
     
     // Letta Agent IPC APIs
-    sendClientEvent: (event: any) => {
+    sendClientEvent: (event: ClientEvent) => {
         electron.ipcRenderer.send("client-event", event);
     },
-    onServerEvent: (callback: (event: any) => void) => {
+    onServerEvent: (callback: (event: ServerEvent) => void) => {
         const cb = (_: Electron.IpcRendererEvent, payload: string) => {
             try {
-                const event = JSON.parse(payload);
+                const event = JSON.parse(payload) as ServerEvent;
                 callback(event);
             } catch (error) {
                 console.error("Failed to parse server event:", error);
@@ -39,6 +41,9 @@ electron.contextBridge.exposeInMainWorld("electron", {
         LETTA_BASE_URL?: string;
         LETTA_API_KEY?: string;
         model?: string;
+        residentCore?: {
+            telegram?: ResidentCoreTelegramStartupConfig | null;
+        };
     }) =>
         ipcInvoke("save-app-config", config),
     selectDirectory: () => 

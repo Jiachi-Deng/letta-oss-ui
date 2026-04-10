@@ -1,0 +1,115 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const createResidentCoreLettaBotHostMock = vi.hoisted(() => vi.fn());
+const ensureBundledLettaServerStartedMock = vi.hoisted(() => vi.fn(async () => ({ status: "unsupported" as const })));
+const ensureCodeIslandStartedMock = vi.hoisted(() => vi.fn(() => ({ status: "unsupported" as const })));
+const startCodeIslandMonitorMock = vi.hoisted(() => vi.fn(() => ({ stop: vi.fn() })));
+const getResidentCoreLettaBotRuntimeConfigMock = vi.hoisted(() => vi.fn(() => ({
+	workingDir: "/tmp/letta-desktop-test/lettabot",
+	telegram: {
+		token: "telegram-token",
+		dmPolicy: "open",
+		streaming: true,
+		workingDir: "/tmp/letta-desktop-test/lettabot",
+	},
+})));
+
+vi.mock("electron", () => ({
+	app: {
+		isPackaged: false,
+		setName: vi.fn(),
+		setAppUserModelId: vi.fn(),
+		getPath: vi.fn(() => "/tmp/letta-desktop-test"),
+	},
+}));
+
+vi.mock("./bundled-letta-server.js", () => ({
+	configureBundledLettaServerEnv: vi.fn(),
+	ensureBundledLettaServerStarted: ensureBundledLettaServerStartedMock,
+	stopBundledLettaServer: vi.fn(),
+}));
+
+vi.mock("./resident-core/lettabot-host.js", () => ({
+	createResidentCoreLettaBotHost: createResidentCoreLettaBotHostMock,
+}));
+
+vi.mock("./bundled-codeisland.js", () => ({
+	ensureCodeIslandStarted: ensureCodeIslandStartedMock,
+	startCodeIslandMonitor: startCodeIslandMonitorMock,
+}));
+
+vi.mock("./config.js", () => ({
+	initializeAppConfig: vi.fn(),
+	getResidentCoreLettaBotRuntimeConfig: getResidentCoreLettaBotRuntimeConfigMock,
+}));
+
+describe("main-runtime resident core wiring", () => {
+	beforeEach(() => {
+		vi.resetModules();
+		vi.clearAllMocks();
+	});
+
+	it("passes Telegram runtime config into the Resident Core LettaBot host", async () => {
+		const backend = {
+			warmSession: vi.fn(async () => undefined),
+			invalidateSession: vi.fn(),
+			getSession: vi.fn(),
+			ensureSessionForKey: vi.fn(),
+			persistSessionState: vi.fn(),
+			runSession: vi.fn(),
+			syncTodoToolCall: vi.fn(),
+		};
+		const host = {
+			start: vi.fn(async () => undefined),
+			stop: vi.fn(),
+			getBot: vi.fn(),
+			getBackend: vi.fn(),
+		};
+		createResidentCoreLettaBotHostMock.mockReturnValue(host);
+
+		const { startElectronRuntimeServices } = await import("./main-runtime.js");
+		startElectronRuntimeServices(backend as never);
+
+		expect(getResidentCoreLettaBotRuntimeConfigMock).toHaveBeenCalledTimes(1);
+		expect(createResidentCoreLettaBotHostMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				config: expect.objectContaining({
+					workingDir: "/tmp/letta-desktop-test/lettabot",
+					conversationMode: "shared",
+					reuseSession: true,
+				}),
+				telegram: expect.objectContaining({
+					token: "telegram-token",
+					dmPolicy: "open",
+					streaming: true,
+				}),
+				backend,
+			}),
+		);
+		expect(host.start).toHaveBeenCalledTimes(1);
+	});
+
+	it("no-ops Telegram startup when the runtime config is absent", async () => {
+		getResidentCoreLettaBotRuntimeConfigMock.mockReturnValue({
+			workingDir: "/tmp/letta-desktop-test/lettabot",
+			telegram: null,
+		});
+		const host = {
+			start: vi.fn(async () => undefined),
+			stop: vi.fn(),
+			getBot: vi.fn(),
+			getBackend: vi.fn(),
+		};
+		createResidentCoreLettaBotHostMock.mockReturnValue(host);
+
+		const { startElectronRuntimeServices } = await import("./main-runtime.js");
+		startElectronRuntimeServices({ warmSession: vi.fn(), invalidateSession: vi.fn() } as never);
+
+		expect(createResidentCoreLettaBotHostMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				telegram: null,
+			}),
+		);
+		expect(host.start).toHaveBeenCalledTimes(1);
+	});
+});

@@ -203,6 +203,10 @@ export function getAllSessionProjections(): Map<string, SessionProjection> {
   return sessionProjections;
 }
 
+export function clearAllSessionProjections(): void {
+  sessionProjections.clear();
+}
+
 // Compatibility aliases for existing call sites. The canonical API is the
 // projection/cache naming above.
 export const createRuntimeSession = createSessionProjection;

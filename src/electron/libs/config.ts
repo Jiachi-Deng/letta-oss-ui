@@ -27,6 +27,23 @@ export type LettaAppConfig = {
   LETTA_BASE_URL: string;
   LETTA_API_KEY?: string;
   model?: string;
+  residentCore?: ResidentCoreConfig;
+};
+
+export type ResidentCoreTelegramStartupConfig = {
+  token?: string;
+  dmPolicy?: "pairing" | "allowlist" | "open";
+  streaming?: boolean;
+  workingDir?: string;
+};
+
+export type ResidentCoreConfig = {
+  telegram?: ResidentCoreTelegramStartupConfig;
+};
+
+export type ResidentCoreLettaBotRuntimeConfig = {
+  workingDir: string;
+  telegram: ResidentCoreTelegramStartupConfig | null;
 };
 
 export type AppConfigLoadResult = {
@@ -61,6 +78,50 @@ function normalizeString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function normalizeBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return undefined;
+}
+
+function normalizeResidentCoreTelegramConfig(value: unknown): ResidentCoreTelegramStartupConfig | undefined {
+  if (!value || typeof value !== "object") return undefined;
+
+  const raw = value as Partial<Record<keyof ResidentCoreTelegramStartupConfig, unknown>>;
+  const token = normalizeString(raw.token);
+  const dmPolicy = raw.dmPolicy === "pairing" || raw.dmPolicy === "allowlist" || raw.dmPolicy === "open"
+    ? raw.dmPolicy
+    : undefined;
+  const streaming = normalizeBoolean(raw.streaming);
+  const workingDir = normalizeString(raw.workingDir);
+
+  if (!token && !dmPolicy && streaming === undefined && !workingDir) {
+    return undefined;
+  }
+
+  const config: ResidentCoreTelegramStartupConfig = {};
+  if (token) config.token = token;
+  if (dmPolicy) config.dmPolicy = dmPolicy;
+  if (streaming !== undefined) config.streaming = streaming;
+  if (workingDir) config.workingDir = workingDir;
+
+  return config;
+}
+
+function normalizeResidentCoreConfig(value: unknown): ResidentCoreConfig | undefined {
+  if (!value || typeof value !== "object") return undefined;
+
+  const raw = value as Partial<Record<keyof ResidentCoreConfig, unknown>>;
+  const telegram = normalizeResidentCoreTelegramConfig(raw.telegram);
+  if (!telegram) return undefined;
+
+  return { telegram };
+}
+
 function normalizeConnectionType(value: unknown, baseUrl?: string): ConnectionType {
   if (value === "letta-server" || value === "anthropic-compatible" || value === "openai-compatible") {
     return value;
@@ -90,6 +151,11 @@ function normalizeConfig(rawConfig: Partial<Record<keyof LettaAppConfig, unknown
   const model = normalizeString(rawConfig.model);
   if (model) {
     config.model = model;
+  }
+
+  const residentCore = normalizeResidentCoreConfig(rawConfig.residentCore);
+  if (residentCore) {
+    config.residentCore = residentCore;
   }
 
   return config;
@@ -131,6 +197,44 @@ function requiresApiKey(config: LettaAppConfig): boolean {
 
 function requiresModel(config: LettaAppConfig): boolean {
   return config.connectionType !== "letta-server" && !config.model;
+}
+
+function readResidentCoreTelegramFromEnv(): ResidentCoreTelegramStartupConfig | undefined {
+  const token = normalizeString(
+    process.env.LETTA_DESKTOP_TELEGRAM_BOT_TOKEN
+      ?? process.env.RESIDENT_CORE_TELEGRAM_BOT_TOKEN
+      ?? process.env.LETTA_TELEGRAM_BOT_TOKEN,
+  );
+  const dmPolicy = process.env.LETTA_DESKTOP_TELEGRAM_DM_POLICY
+    ?? process.env.RESIDENT_CORE_TELEGRAM_DM_POLICY
+    ?? process.env.LETTA_TELEGRAM_DM_POLICY;
+  const streamingRaw = normalizeString(
+    process.env.LETTA_DESKTOP_TELEGRAM_STREAMING
+      ?? process.env.RESIDENT_CORE_TELEGRAM_STREAMING
+      ?? process.env.LETTA_TELEGRAM_STREAMING,
+  );
+  const workingDir = normalizeString(
+    process.env.LETTA_DESKTOP_TELEGRAM_WORKING_DIR
+      ?? process.env.RESIDENT_CORE_TELEGRAM_WORKING_DIR
+      ?? process.env.LETTA_TELEGRAM_WORKING_DIR,
+  );
+
+  if (!token && !dmPolicy && streamingRaw === undefined && !workingDir) {
+    return undefined;
+  }
+
+  const config: ResidentCoreTelegramStartupConfig = {};
+  if (token) config.token = token;
+  if (dmPolicy === "pairing" || dmPolicy === "allowlist" || dmPolicy === "open") {
+    config.dmPolicy = dmPolicy;
+  }
+  if (streamingRaw !== undefined) {
+    const streaming = normalizeBoolean(streamingRaw);
+    if (streaming !== undefined) config.streaming = streaming;
+  }
+  if (workingDir) config.workingDir = workingDir;
+
+  return config;
 }
 
 function toAppConfigState(result: AppConfigLoadResult): AppConfigState {
@@ -359,4 +463,18 @@ export function saveAppConfig(configInput: Partial<LettaAppConfig>): AppConfigSt
   console.log("[config] Saved packaged Letta config to:", configPath, nextConfig.LETTA_BASE_URL);
 
   return toAppConfigState(currentConfigLoadResult);
+}
+
+export function getResidentCoreLettaBotRuntimeConfig(): ResidentCoreLettaBotRuntimeConfig {
+  const appConfigTelegram = getAppConfigState().config.residentCore?.telegram;
+  const envTelegram = readResidentCoreTelegramFromEnv();
+  const telegram = normalizeResidentCoreTelegramConfig({
+    ...appConfigTelegram,
+    ...envTelegram,
+  });
+
+  return {
+    workingDir: telegram?.workingDir ?? join(app.getPath("userData"), "lettabot"),
+    telegram: telegram ?? null,
+  };
 }

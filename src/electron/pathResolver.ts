@@ -24,10 +24,12 @@ export function getPreloadPath(): string {
     const appRootPath = getAppRootPath();
 
     if (!app.isPackaged) {
-        return path.join(appRootPath, "dist-electron", "preload.cjs");
+        return path.join(appRootPath, "dist-electron", "electron", "preload.cjs");
     }
 
     return resolveFirstExistingPath("preload script", [
+        path.join(getResourcesRootPath(), "dist-electron", "electron", "preload.cjs"),
+        path.join(appRootPath, "dist-electron", "electron", "preload.cjs"),
         path.join(getResourcesRootPath(), "dist-electron", "preload.cjs"),
         path.join(appRootPath, "dist-electron", "preload.cjs"),
         path.join(getResourcesRootPath(), "preload.cjs"),

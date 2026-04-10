@@ -7,10 +7,18 @@ const updateSessionProjectionMock = vi.hoisted(() => vi.fn());
 const getSessionProjectionMock = vi.hoisted(() => vi.fn());
 const getSessionProjectionHistoryMock = vi.hoisted(() => vi.fn());
 const deleteSessionProjectionMock = vi.hoisted(() => vi.fn());
+const listSessionProjectionsMock = vi.hoisted(() => vi.fn());
+const rekeySessionProjectionMock = vi.hoisted(() => vi.fn());
+const appendSessionProjectionMessageMock = vi.hoisted(() => vi.fn());
+const clearAllSessionProjectionsMock = vi.hoisted(() => vi.fn());
 const clearCodeIslandObservationMock = vi.hoisted(() => vi.fn());
 const finishCodeIslandObservationMock = vi.hoisted(() => vi.fn());
 
 vi.mock("electron", () => ({
+	app: {
+		isPackaged: false,
+		getPath: vi.fn(() => "/tmp/letta-desktop-test"),
+	},
 	BrowserWindow: {
 		getAllWindows: () => [
 			{
@@ -32,6 +40,10 @@ vi.mock("./libs/runtime-state.js", () => ({
 	getSessionProjection: getSessionProjectionMock,
 	getSessionProjectionHistory: getSessionProjectionHistoryMock,
 	deleteSessionProjection: deleteSessionProjectionMock,
+	listSessionProjections: listSessionProjectionsMock,
+	rekeySessionProjection: rekeySessionProjectionMock,
+	appendSessionProjectionMessage: appendSessionProjectionMessageMock,
+	clearAllSessionProjections: clearAllSessionProjectionsMock,
 }));
 
 vi.mock("./libs/codeisland-observer.js", () => ({
@@ -40,11 +52,26 @@ vi.mock("./libs/codeisland-observer.js", () => ({
 }));
 
 describe("handleClientEvent", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.resetModules();
 		vi.clearAllMocks();
 		getSessionProjectionMock.mockReturnValue(undefined);
 		getSessionProjectionHistoryMock.mockReturnValue([]);
+
+		const { bindResidentCoreService, residentCoreBroadcast } = await import("./ipc-handlers.ts");
+		const { ResidentCoreService } = await import("./libs/resident-core/resident-core.ts");
+		const mockSessionOwner = {
+			runDesktopSession: vi.fn(),
+			warmDesktopSession: vi.fn(),
+			invalidateDesktopSession: vi.fn(),
+			runBotSession: vi.fn(),
+			warmBotSession: vi.fn(),
+			invalidateBotSession: vi.fn(),
+		};
+
+		bindResidentCoreService(
+			new ResidentCoreService(residentCoreBroadcast, mockSessionOwner as never),
+		);
 	});
 
 	it("broadcasts runner.error when session start fails", async () => {

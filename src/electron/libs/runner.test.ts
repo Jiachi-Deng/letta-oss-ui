@@ -5,36 +5,17 @@ import {
   STREAM_EMPTY_RESULT_001,
 } from "../../shared/decision-ids.js";
 
-const createSessionMock = vi.hoisted(() => vi.fn());
-const resumeSessionMock = vi.hoisted(() => vi.fn());
-const getAppConfigStateMock = vi.hoisted(() => vi.fn());
-const prepareRuntimeConnectionMock = vi.hoisted(() => vi.fn());
-const acquireReusableConversationSessionMock = vi.hoisted(() => vi.fn());
-const beginReusableConversationTurnMock = vi.hoisted(() => vi.fn());
-const completeReusableConversationTurnMock = vi.hoisted(() => vi.fn());
 const beginCodeIslandObservationMock = vi.hoisted(() => vi.fn());
 const finishCodeIslandObservationMock = vi.hoisted(() => vi.fn());
 const mirrorCodeIslandAssistantMessageMock = vi.hoisted(() => vi.fn());
 const mirrorCodeIslandToolResultMock = vi.hoisted(() => vi.fn());
 const mirrorCodeIslandToolRunningMock = vi.hoisted(() => vi.fn());
-
-vi.mock("@letta-ai/letta-code-sdk", () => ({
-  createSession: createSessionMock,
-  resumeSession: resumeSessionMock,
+const sessionOwnerMock = vi.hoisted(() => ({
+  runDesktopSession: vi.fn(),
 }));
 
-vi.mock("./config.js", () => ({
-  getAppConfigState: getAppConfigStateMock,
-}));
-
-vi.mock("./provider-bootstrap.js", () => ({
-  prepareRuntimeConnection: prepareRuntimeConnectionMock,
-}));
-
-vi.mock("./conversation-session-cache.js", () => ({
-  acquireReusableConversationSession: acquireReusableConversationSessionMock,
-  beginReusableConversationTurn: beginReusableConversationTurnMock,
-  completeReusableConversationTurn: completeReusableConversationTurnMock,
+vi.mock("./resident-core/session-owner.js", () => ({
+  createResidentCoreSessionOwner: vi.fn(() => sessionOwnerMock),
 }));
 
 vi.mock("./codeisland-observer.js", () => ({
@@ -58,21 +39,7 @@ describe("runLetta", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    acquireReusableConversationSessionMock.mockReturnValue(null);
-    getAppConfigStateMock.mockReturnValue({
-      config: {
-        connectionType: "letta-server",
-        LETTA_BASE_URL: "http://localhost:8283",
-        model: "gpt-4o",
-      },
-    });
-    prepareRuntimeConnectionMock.mockResolvedValue({
-      baseUrl: "http://localhost:8283",
-      apiKey: "local-dev-key",
-      modelHandle: "gpt-4o",
-      cliPath: "/tmp/letta.js",
-      bootstrapAction: { kind: "none" },
-    });
+    sessionOwnerMock.runDesktopSession.mockReset();
   });
 
   afterEach(async () => {
@@ -81,18 +48,10 @@ describe("runLetta", () => {
   });
 
   it("logs permission requests and empty stream results with stable phase 1 ids", async () => {
-    let capturedSessionOptions: {
-      canUseTool: (toolName: string, input: unknown) => Promise<unknown>;
-    } | null = null;
-
     const fakeSession: FakeSession = {
       conversationId: "conv_runner",
       agentId: "agent_runner",
-      send: vi.fn(async () => {
-        void capturedSessionOptions?.canUseTool("AskUserQuestion", {
-          question: "Approve this tool?",
-        });
-      }),
+      send: vi.fn(async () => undefined),
       stream: async function* () {
         yield { type: "result", success: true };
       },
@@ -100,13 +59,14 @@ describe("runLetta", () => {
       abort: vi.fn(async () => undefined),
     };
 
-    createSessionMock.mockImplementation((_agentId, sessionOptions) => {
-      capturedSessionOptions = sessionOptions;
-      return fakeSession;
-    });
-    resumeSessionMock.mockImplementation((_conversationId, sessionOptions) => {
-      capturedSessionOptions = sessionOptions;
-      return fakeSession;
+    sessionOwnerMock.runDesktopSession.mockImplementation(async (options) => {
+      void options.canUseTool?.("AskUserQuestion", {
+        question: "Approve this tool?",
+      });
+      return {
+        session: fakeSession,
+        stream: fakeSession.stream,
+      };
     });
 
     const { getDiagnosticSummary, listDiagnosticSteps, resetDiagnosticsForTests } = await import("./diagnostics.js");
@@ -124,6 +84,9 @@ describe("runLetta", () => {
           pendingPermissions: new Map(),
         },
         trace: { traceId: "trc_runner", turnId: "turn_runner" },
+        runtime: {
+          sessionOwner: sessionOwnerMock,
+        },
         onEvent,
       });
 
@@ -152,8 +115,7 @@ describe("runLetta", () => {
         }),
       );
 
-      expect(capturedSessionOptions).not.toBeNull();
-      expect(fakeSession.send).toHaveBeenCalledWith("Hello");
+      expect(sessionOwnerMock.runDesktopSession).toHaveBeenCalledTimes(1);
       expect(beginCodeIslandObservationMock).toHaveBeenCalledWith(
         "conv_runner",
         "/tmp/workspace",

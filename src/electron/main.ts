@@ -1,10 +1,13 @@
 import { app, BrowserWindow, ipcMain, dialog, globalShortcut, Menu } from "electron"
+import { join } from "node:path";
+import type { SessionBackend } from "lettabot/core/interfaces.js";
 import { ipcMainHandle, isDev, DEV_PORT } from "./util.js";
 import { getPreloadPath, getUIPath, getIconPath } from "./pathResolver.js";
 import { getStaticData, pollResources, stopPolling } from "./test.js";
-import { handleClientEvent, cleanupAllSessions } from "./ipc-handlers.js";
+import { bindResidentCoreService, cleanupAllSessions, handleClientEvent, residentCoreBroadcast } from "./ipc-handlers.js";
 import type { ClientEvent } from "./types.js";
-import { getAppConfigState, saveAppConfig } from "./libs/config.js";
+import { getAppConfigState, getResidentCoreLettaBotRuntimeConfig, saveAppConfig } from "./libs/config.js";
+import type { ResidentCoreLettaBotRuntimeConfig } from "./libs/config.js";
 import {
     getBundledLettaServerRuntimeStatus,
 } from "./libs/bundled-letta-server.js";
@@ -25,52 +28,119 @@ import {
     stopElectronRuntimeServices,
     startElectronRuntimeServices,
 } from "./libs/main-runtime.js";
+import { createResidentCoreTelegramRuntimeBundle } from "./libs/main-runtime.js";
+import { createResidentCoreService } from "./libs/resident-core/resident-core.js";
+import { createResidentCoreSessionBackend } from "./libs/resident-core/resident-core-session-backend.js";
+import { createResidentCoreSessionOwner } from "./libs/resident-core/session-owner.js";
+import { createResidentCoreRuntimeHost } from "./libs/resident-core/runtime-host.js";
+import { createComponentLogger } from "./libs/trace.js";
 
 bootstrapElectronRuntime();
 
 let cleanupComplete = false;
 let mainWindow: BrowserWindow | null = null;
 let codeIslandMonitor: CodeIslandMonitorHandle | null = null;
+let lettabotHost: import("./libs/resident-core/lettabot-host.js").ResidentCoreLettaBotHost | null = null;
+let residentCoreSessionOwner: import("./libs/resident-core/session-owner.js").ResidentCoreSessionOwner | null = null;
+let residentCoreService: ReturnType<typeof createResidentCoreService> | null = null;
+let lettabotBackend: SessionBackend | null = null;
+const mainLog = createComponentLogger("main");
 
-function cleanup(): void {
+function maskTelegramToken(token?: string | null): string | null {
+    const trimmedToken = token?.trim();
+    if (!trimmedToken) return null;
+    return `***${trimmedToken.slice(-4)}`;
+}
+
+function summarizeResidentCoreLettaBotRuntimeConfig(
+    config: ResidentCoreLettaBotRuntimeConfig,
+): Record<string, unknown> {
+    const telegram = config.telegram;
+    return {
+        workingDir: config.workingDir,
+        hasToken: Boolean(telegram?.token?.trim()),
+        tokenTail: maskTelegramToken(telegram?.token),
+        dmPolicy: telegram?.dmPolicy ?? null,
+        streaming: telegram?.streaming ?? null,
+        telegramWorkingDir: telegram?.workingDir ?? null,
+    };
+}
+
+function cleanupRuntime(): void {
     if (cleanupComplete) return;
     cleanupComplete = true;
 
     globalShortcut.unregisterAll();
     flushDiagnosticsPersistence();
     stopPolling();
-    stopElectronRuntimeServices(codeIslandMonitor);
+    stopElectronRuntimeServices(codeIslandMonitor, lettabotHost);
     codeIslandMonitor = null;
+    lettabotHost = null;
     cleanupAllSessions();
     stopElectronDevelopmentServer();
 }
 
+async function reloadResidentCoreTelegramRuntime(): Promise<void> {
+    if (!residentCoreSessionOwner || !residentCoreService) {
+        throw new Error("Resident Core is not initialized");
+    }
+
+    const previousHost = lettabotHost;
+    const previousBackend = lettabotBackend;
+    const currentCodeIslandMonitor = codeIslandMonitor;
+    const nextRuntimeConfig = getResidentCoreLettaBotRuntimeConfig();
+
+    mainLog({
+        level: "info",
+        message: "resident core telegram runtime reload requested",
+        data: summarizeResidentCoreLettaBotRuntimeConfig(nextRuntimeConfig),
+    });
+
+    if (previousHost) {
+        await previousHost.stop();
+    }
+
+    residentCoreService.cleanupAllSessions();
+    lettabotHost = null;
+    lettabotBackend = null;
+
+    const nextRuntime = createResidentCoreTelegramRuntimeBundle(residentCoreSessionOwner);
+
+    try {
+        await nextRuntime.lettabotHost.start();
+    } catch (error) {
+        mainLog({
+            level: "error",
+            message: "resident core telegram runtime reload failed",
+            data: {
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            },
+        });
+        throw error;
+    }
+
+    lettabotBackend = nextRuntime.backend;
+    lettabotHost = nextRuntime.lettabotHost;
+    codeIslandMonitor = currentCodeIslandMonitor;
+
+    mainLog({
+        level: "info",
+        message: "resident core telegram runtime reload completed",
+        data: {
+            previousBackendConfigured: Boolean(previousBackend),
+            nextWorkingDir: nextRuntime.runtimeConfig.workingDir,
+        },
+    });
+}
+
 function handleSignal(): void {
-    cleanup();
+    cleanupRuntime();
     app.quit();
 }
 
-// Initialize everything when app is ready
-app.on("ready", () => {
-    Menu.setApplicationMenu(null);
-    // Setup event handlers
-    app.on("before-quit", cleanup);
-    app.on("will-quit", cleanup);
-    app.on("window-all-closed", () => {
-        cleanup();
-        app.quit();
-    });
-
-    process.on("SIGTERM", handleSignal);
-    process.on("SIGINT", handleSignal);
-    process.on("SIGHUP", handleSignal);
-
-    initializeDiagnosticsPersistence(app.getPath("userData"));
-    const runtimeServices = startElectronRuntimeServices();
-    codeIslandMonitor = runtimeServices.codeIslandMonitor;
-
-    // Create main window
-    mainWindow = new BrowserWindow({
+function createMainWindow(): BrowserWindow {
+    const window = new BrowserWindow({
         width: 1200,
         height: 800,
         minWidth: 900,
@@ -84,15 +154,77 @@ app.on("ready", () => {
         trafficLightPosition: { x: 15, y: 18 }
     });
 
-    if (isDev()) mainWindow.loadURL(`http://localhost:${DEV_PORT}`)
-    else mainWindow.loadFile(getUIPath());
+    window.on("closed", () => {
+        if (mainWindow === window) {
+            mainWindow = null;
+        }
+        stopPolling();
+    });
+
+    if (isDev()) window.loadURL(`http://localhost:${DEV_PORT}`)
+    else window.loadFile(getUIPath());
+
+    pollResources(window);
+    mainWindow = window;
+    return window;
+}
+
+// Initialize everything when app is ready
+app.on("ready", () => {
+    Menu.setApplicationMenu(null);
+    app.on("before-quit", cleanupRuntime);
+    app.on("will-quit", cleanupRuntime);
+    app.on("window-all-closed", ((event: Electron.Event) => {
+        event.preventDefault();
+        stopPolling();
+    }) as any);
+    app.on("activate", () => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+            createMainWindow();
+        }
+    });
+
+    process.on("SIGTERM", handleSignal);
+    process.on("SIGINT", handleSignal);
+    process.on("SIGHUP", handleSignal);
+
+    initializeDiagnosticsPersistence(app.getPath("userData"));
+    residentCoreSessionOwner = createResidentCoreSessionOwner({
+        runtimeHost: createResidentCoreRuntimeHost(),
+    });
+    residentCoreService = createResidentCoreService(residentCoreBroadcast, residentCoreSessionOwner);
+    bindResidentCoreService(residentCoreService);
+    const lettabotRuntimeConfig = getResidentCoreLettaBotRuntimeConfig();
+    mainLog({
+        level: "info",
+        message: "resident core telegram runtime config read",
+        data: summarizeResidentCoreLettaBotRuntimeConfig(lettabotRuntimeConfig),
+    });
+    const lettabotWorkingDir = lettabotRuntimeConfig.workingDir;
+    lettabotBackend = createResidentCoreSessionBackend({
+        owner: residentCoreSessionOwner,
+        config: {
+            workingDir: lettabotWorkingDir,
+            allowedTools: [],
+            conversationMode: "shared",
+            reuseSession: true,
+            agentName: "ResidentCoreLettaBot",
+            logging: {
+                turnLogFile: join(lettabotWorkingDir, "turns.jsonl"),
+                maxTurns: 500,
+            },
+        } as const,
+    });
+    const runtimeServices = startElectronRuntimeServices(lettabotBackend);
+    codeIslandMonitor = runtimeServices.codeIslandMonitor;
+    lettabotHost = runtimeServices.lettabotHost;
 
     globalShortcut.register('CommandOrControl+Q', () => {
-        cleanup();
+        cleanupRuntime();
         app.quit();
     });
 
-    pollResources(mainWindow);
+    createMainWindow();
 
     ipcMainHandle("getStaticData", () => {
         return getStaticData(getCodeIslandRuntimeStatus(), getBundledLettaServerRuntimeStatus());
@@ -114,8 +246,10 @@ app.on("ready", () => {
         return getLatestDiagnosticSummaryForSession(sessionId);
     });
 
-    ipcMainHandle("save-app-config", (_event, config) => {
-        return saveAppConfig(config);
+    ipcMainHandle("save-app-config", async (_event, config) => {
+        const nextState = saveAppConfig(config);
+        await reloadResidentCoreTelegramRuntime();
+        return nextState;
     });
 
     // Handle client events

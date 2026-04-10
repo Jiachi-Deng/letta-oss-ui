@@ -6,22 +6,70 @@ import {
   ensureBundledLettaServerStarted,
   stopBundledLettaServer,
 } from "./bundled-letta-server.js";
+import { createResidentCoreLettaBotHost, type ResidentCoreLettaBotHost } from "./resident-core/lettabot-host.js";
 import {
   ensureCodeIslandStarted,
   startCodeIslandMonitor,
   type CodeIslandMonitorHandle,
 } from "./bundled-codeisland.js";
-import { initializeAppConfig } from "./config.js";
+import type { SessionBackend } from "lettabot/core/interfaces.js";
+import type { BotConfig } from "lettabot/core/types.js";
+import { getResidentCoreLettaBotRuntimeConfig, initializeAppConfig } from "./config.js";
+import type { ResidentCoreLettaBotRuntimeConfig, ResidentCoreTelegramStartupConfig } from "./config.js";
 import { createComponentLogger, createTraceContext, createTurnId } from "./trace.js";
+import { join } from "node:path";
+import { createResidentCoreSessionBackend } from "./resident-core/resident-core-session-backend.js";
+import type { ResidentCoreSessionOwner } from "./resident-core/session-owner.js";
 
 const PRODUCT_NAME = "Letta";
 const APP_ID = "com.jachi.letta";
 
 export type ElectronRuntimeServices = {
   codeIslandMonitor: CodeIslandMonitorHandle | null;
+  lettabotHost: ResidentCoreLettaBotHost | null;
+};
+
+export type ResidentCoreTelegramRuntimeBundle = {
+  backend: SessionBackend;
+  lettabotHost: ResidentCoreLettaBotHost;
+  runtimeConfig: ResidentCoreLettaBotRuntimeConfig;
 };
 
 const runtimeLog = createComponentLogger("main-runtime");
+
+function maskTelegramToken(token?: string | null): string | null {
+  const trimmedToken = token?.trim();
+  if (!trimmedToken) return null;
+  return `***${trimmedToken.slice(-4)}`;
+}
+
+function summarizeTelegramRuntimeConfig(config: ResidentCoreLettaBotRuntimeConfig): Record<string, unknown> {
+  const telegram: ResidentCoreTelegramStartupConfig | null = config.telegram;
+  return {
+    workingDir: config.workingDir,
+    hasToken: Boolean(telegram?.token?.trim()),
+    tokenTail: maskTelegramToken(telegram?.token),
+    dmPolicy: telegram?.dmPolicy ?? null,
+    streaming: telegram?.streaming ?? null,
+    telegramWorkingDir: telegram?.workingDir ?? null,
+  };
+}
+
+function createResidentCoreLettaBotConfig(
+  runtimeConfig: ResidentCoreLettaBotRuntimeConfig,
+): BotConfig {
+  return {
+    workingDir: runtimeConfig.workingDir,
+    allowedTools: [],
+    conversationMode: "shared",
+    reuseSession: true,
+    agentName: "ResidentCoreLettaBot",
+    logging: {
+      turnLogFile: join(runtimeConfig.workingDir, "turns.jsonl"),
+      maxTurns: 500,
+    },
+  };
+}
 
 function configureRuntimeIdentity(): void {
   app.setName(PRODUCT_NAME);
@@ -56,6 +104,28 @@ export function bootstrapElectronRuntime(): void {
   configureLettaCliPathFromSystem();
 }
 
+export function createResidentCoreTelegramRuntimeBundle(
+  sessionOwner: ResidentCoreSessionOwner,
+): ResidentCoreTelegramRuntimeBundle {
+  const runtimeConfig = getResidentCoreLettaBotRuntimeConfig();
+  const botConfig = createResidentCoreLettaBotConfig(runtimeConfig);
+  const backend = createResidentCoreSessionBackend({
+    owner: sessionOwner,
+    config: botConfig,
+  });
+  const lettabotHost = createResidentCoreLettaBotHost({
+    config: botConfig,
+    backend,
+    telegram: runtimeConfig.telegram,
+  });
+
+  return {
+    backend,
+    lettabotHost,
+    runtimeConfig,
+  };
+}
+
 export function stopElectronDevelopmentServer(): void {
   if (!isDev()) {
     return;
@@ -77,12 +147,14 @@ export function stopElectronDevelopmentServer(): void {
   }
 }
 
-export function stopElectronRuntimeServices(codeIslandMonitor: CodeIslandMonitorHandle | null): void {
+export function stopElectronRuntimeServices(codeIslandMonitor: CodeIslandMonitorHandle | null, lettabotHost: ResidentCoreLettaBotHost | null = null): void {
   codeIslandMonitor?.stop();
+  void lettabotHost?.stop();
   stopBundledLettaServer();
 }
 
-export function startElectronRuntimeServices(): ElectronRuntimeServices {
+export function startElectronRuntimeServices(lettabotBackend: SessionBackend): ElectronRuntimeServices {
+  const lettabotRuntimeConfig = getResidentCoreLettaBotRuntimeConfig();
   const serverTrace = createTraceContext({ turnId: createTurnId() });
 
   runtimeLog({
@@ -115,7 +187,8 @@ export function startElectronRuntimeServices(): ElectronRuntimeServices {
         trace_id: serverTrace.traceId,
         turn_id: serverTrace.turnId,
         data: {
-          error: String(error),
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
         },
       });
     });
@@ -126,6 +199,32 @@ export function startElectronRuntimeServices(): ElectronRuntimeServices {
   });
   const codeIslandMonitor = startCodeIslandMonitor(undefined, {
     trace: codeIslandTrace,
+  });
+  const lettabotHost = createResidentCoreLettaBotHost({
+    config: createResidentCoreLettaBotConfig(lettabotRuntimeConfig),
+    backend: lettabotBackend,
+    telegram: lettabotRuntimeConfig.telegram,
+  });
+
+  runtimeLog({
+    level: "info",
+    message: "resident-core lettabot host startup requested",
+    trace_id: serverTrace.traceId,
+    turn_id: serverTrace.turnId,
+    data: summarizeTelegramRuntimeConfig(lettabotRuntimeConfig),
+  });
+
+  void lettabotHost.start().catch((error) => {
+    runtimeLog({
+      level: "error",
+      message: "resident-core lettabot startup failed",
+      trace_id: serverTrace.traceId,
+      turn_id: serverTrace.turnId,
+      data: {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
+    });
   });
 
   if (codeIslandStartup.status === "launched" && codeIslandStartup.resolution) {
@@ -144,5 +243,6 @@ export function startElectronRuntimeServices(): ElectronRuntimeServices {
 
   return {
     codeIslandMonitor,
+    lettabotHost,
   };
 }
