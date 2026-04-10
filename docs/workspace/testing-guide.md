@@ -37,6 +37,11 @@
 
 如果界面里有 `Copy diagnostics`，先点它。
 
+更完整的排障口径见：
+
+- `/Users/jachi/Desktop/letta-workspace/docs/observability.md`
+- `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/docs/workspace/observability.md`
+
 ## 3. 每轮最少要验什么
 
 ### 3.1 Desktop 路径

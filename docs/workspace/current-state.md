@@ -49,3 +49,17 @@
 - CodeIsland = companion layer
 
 这条架构往前走。
+
+## Observability
+
+当前已经有 desktop-centric 的可观测性雏形，正式规范见：
+
+- `/Users/jachi/Desktop/letta-workspace/docs/observability.md`
+- `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/docs/workspace/observability.md`
+
+排障时优先看：
+
+- `traceId`
+- `decisionId`
+- `errorCode`
+- `Copy diagnostics`

@@ -62,6 +62,10 @@ bunx tsc --noEmit
 bun run build
 ```
 
+Observability design note:
+
+- `/Users/jachi/Desktop/letta-workspace/docs/observability.md`
+
 ## Release verification
 
 从 workspace 根目录运行：
