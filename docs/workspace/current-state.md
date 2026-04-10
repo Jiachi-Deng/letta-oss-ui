@@ -13,7 +13,6 @@ This document is a snapshot of the reorganized workspace after migration and cle
   - `/Users/jachi/Desktop/letta-workspace/vendor/letta-code`
   - `/Users/jachi/Desktop/letta-workspace/vendor/code-island`
   - `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk`
-  - `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk-local` (legacy local patch repo, no longer active, GitHub repo archived)
 - Runtime:
   - `/Users/jachi/Desktop/letta-workspace/runtime/python/venv`
 - Releases:
@@ -46,6 +45,8 @@ This document is a snapshot of the reorganized workspace after migration and cle
 
 - `vendor/letta-code-sdk`
   - standard SDK fork with minimal Electron transport patch
+- archived legacy SDK repo retained only on GitHub:
+  - `https://github.com/Jiachi-Deng/letta-code-sdk-local`
 
 ## Current remote situation
 
