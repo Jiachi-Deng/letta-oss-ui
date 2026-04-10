@@ -34,6 +34,13 @@ import { createResidentCoreSessionBackend } from "./libs/resident-core/resident-
 import { createResidentCoreSessionOwner } from "./libs/resident-core/session-owner.js";
 import { createResidentCoreRuntimeHost } from "./libs/resident-core/runtime-host.js";
 import { createComponentLogger } from "./libs/trace.js";
+import {
+    TG_RUNTIME_RELOAD_001,
+    TG_RUNTIME_RELOAD_002,
+    TG_RUNTIME_RELOAD_003,
+    TG_RUNTIME_RELOAD_004,
+} from "../shared/decision-ids.js";
+import { E_TELEGRAM_RUNTIME_RELOAD_FAILED } from "../shared/error-codes.js";
 
 bootstrapElectronRuntime();
 
@@ -92,6 +99,7 @@ async function reloadResidentCoreTelegramRuntime(): Promise<void> {
 
     mainLog({
         level: "info",
+        decision_id: TG_RUNTIME_RELOAD_001,
         message: "resident core telegram runtime reload requested",
         data: summarizeResidentCoreLettaBotRuntimeConfig(nextRuntimeConfig),
     });
@@ -108,9 +116,20 @@ async function reloadResidentCoreTelegramRuntime(): Promise<void> {
 
     try {
         await nextRuntime.lettabotHost.start();
+        mainLog({
+            level: "info",
+            decision_id: TG_RUNTIME_RELOAD_002,
+            message: "resident core telegram runtime restart succeeded",
+            data: {
+                nextWorkingDir: nextRuntime.runtimeConfig.workingDir,
+                hasTelegramToken: Boolean(nextRuntime.runtimeConfig.telegram?.token?.trim()),
+            },
+        });
     } catch (error) {
         mainLog({
             level: "error",
+            decision_id: TG_RUNTIME_RELOAD_004,
+            error_code: E_TELEGRAM_RUNTIME_RELOAD_FAILED,
             message: "resident core telegram runtime reload failed",
             data: {
                 error: error instanceof Error ? error.message : String(error),
@@ -126,6 +145,7 @@ async function reloadResidentCoreTelegramRuntime(): Promise<void> {
 
     mainLog({
         level: "info",
+        decision_id: TG_RUNTIME_RELOAD_003,
         message: "resident core telegram runtime reload completed",
         data: {
             previousBackendConfigured: Boolean(previousBackend),

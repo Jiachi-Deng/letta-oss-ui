@@ -4,6 +4,12 @@ import {
   BOOT_CONN_002,
   CI_BOOT_004,
   IPC_START_001,
+  LETTABOT_BACKGROUND_RUN_003,
+  LETTABOT_CHANNEL_START_001,
+  RC_BOT_ENSURE_003,
+  RC_RUNTIME_PREP_003,
+  TG_RUNTIME_RELOAD_004,
+  TG_RUNTIME_START_003,
   RUNNER_INIT_001,
   RUNNER_INIT_002,
   STREAM_002,
@@ -22,6 +28,12 @@ import {
   E_SERVER_HEALTHCHECK_TIMEOUT,
   E_SERVER_START_FAILED,
   E_SERVER_UNEXPECTED_EXIT,
+  E_LETTABOT_BACKGROUND_RUN_FAILED,
+  E_LETTABOT_CHANNEL_START_FAILED,
+  E_RESIDENT_CORE_BOT_ENSURE_FAILED,
+  E_RESIDENT_CORE_RUNTIME_PREP_FAILED,
+  E_TELEGRAM_RUNTIME_RELOAD_FAILED,
+  E_TELEGRAM_RUNTIME_START_FAILED,
   E_SESSION_STOP_FAILED,
   E_STREAM_EMPTY_RESULT,
 } from "../../shared/error-codes.js";
@@ -287,6 +299,90 @@ describe("diagnostics aggregation", () => {
     expect(getDiagnosticSummary("trc_ci_monitor")).toMatchObject({
       suggestedAction:
         "Inspect the CodeIsland monitor restart path and the preceding launch command result.",
+    });
+  });
+
+  it("suggests next steps for lettabot channel-layer failures", () => {
+    emitStructuredLog({
+      level: "error",
+      component: "lettabot-bot",
+      trace_id: "trc_lettabot_channel",
+      decision_id: LETTABOT_CHANNEL_START_001,
+      error_code: E_LETTABOT_CHANNEL_START_FAILED,
+      message: "channel startup failed",
+    });
+    emitStructuredLog({
+      level: "error",
+      component: "lettabot-bot",
+      trace_id: "trc_lettabot_bg",
+      decision_id: LETTABOT_BACKGROUND_RUN_003,
+      error_code: E_LETTABOT_BACKGROUND_RUN_FAILED,
+      message: "background run failed",
+    });
+
+    expect(getDiagnosticSummary("trc_lettabot_channel")).toMatchObject({
+      suggestedAction:
+        "Inspect the failing LettaBot channel adapter startup and the adapter-specific credentials or network path.",
+    });
+    expect(getDiagnosticSummary("trc_lettabot_bg")).toMatchObject({
+      suggestedAction:
+        "Inspect the heartbeat/cron/background trigger path and the corresponding LettaBot session run trace.",
+    });
+  });
+
+  it("suggests next steps for Resident Core boundary failures", () => {
+    emitStructuredLog({
+      level: "error",
+      component: "resident-core-runtime-host",
+      trace_id: "trc_rc_runtime",
+      decision_id: RC_RUNTIME_PREP_003,
+      error_code: E_RESIDENT_CORE_RUNTIME_PREP_FAILED,
+      message: "runtime prep failed",
+    });
+    emitStructuredLog({
+      level: "error",
+      component: "resident-core-session-owner",
+      trace_id: "trc_rc_ensure",
+      decision_id: RC_BOT_ENSURE_003,
+      error_code: E_RESIDENT_CORE_BOT_ENSURE_FAILED,
+      message: "ensure bot session failed",
+    });
+
+    expect(getDiagnosticSummary("trc_rc_runtime")).toMatchObject({
+      suggestedAction:
+        "Inspect the Resident Core runtime host, app config state, and provider bootstrap path before session creation.",
+    });
+    expect(getDiagnosticSummary("trc_rc_ensure")).toMatchObject({
+      suggestedAction:
+        "Inspect the Resident Core bot ensure-session path and why a reusable session could not be initialized or resumed.",
+    });
+  });
+
+  it("suggests next steps for Telegram runtime lifecycle failures", () => {
+    emitStructuredLog({
+      level: "error",
+      component: "main",
+      trace_id: "trc_tg_reload",
+      decision_id: TG_RUNTIME_RELOAD_004,
+      error_code: E_TELEGRAM_RUNTIME_RELOAD_FAILED,
+      message: "telegram runtime reload failed",
+    });
+    emitStructuredLog({
+      level: "error",
+      component: "main-runtime",
+      trace_id: "trc_tg_start",
+      decision_id: TG_RUNTIME_START_003,
+      error_code: E_TELEGRAM_RUNTIME_START_FAILED,
+      message: "telegram runtime start failed",
+    });
+
+    expect(getDiagnosticSummary("trc_tg_reload")).toMatchObject({
+      suggestedAction:
+        "Inspect the save-app-config hot reload path, previous LettaBot host shutdown, and the next Telegram runtime bundle startup.",
+    });
+    expect(getDiagnosticSummary("trc_tg_start")).toMatchObject({
+      suggestedAction:
+        "Inspect the Telegram runtime startup path during app boot, including runtime config, host creation, and adapter startup.",
     });
   });
 

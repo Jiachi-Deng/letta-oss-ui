@@ -20,6 +20,12 @@ import { createComponentLogger, createTraceContext, createTurnId } from "./trace
 import { join } from "node:path";
 import { createResidentCoreSessionBackend } from "./resident-core/resident-core-session-backend.js";
 import type { ResidentCoreSessionOwner } from "./resident-core/session-owner.js";
+import {
+  TG_RUNTIME_START_001,
+  TG_RUNTIME_START_002,
+  TG_RUNTIME_START_003,
+} from "../../shared/decision-ids.js";
+import { E_TELEGRAM_RUNTIME_START_FAILED } from "../../shared/error-codes.js";
 
 const PRODUCT_NAME = "Letta";
 const APP_ID = "com.jachi.letta";
@@ -208,6 +214,7 @@ export function startElectronRuntimeServices(lettabotBackend: SessionBackend): E
 
   runtimeLog({
     level: "info",
+    decision_id: TG_RUNTIME_START_001,
     message: "resident-core lettabot host startup requested",
     trace_id: serverTrace.traceId,
     turn_id: serverTrace.turnId,
@@ -217,6 +224,8 @@ export function startElectronRuntimeServices(lettabotBackend: SessionBackend): E
   void lettabotHost.start().catch((error) => {
     runtimeLog({
       level: "error",
+      decision_id: TG_RUNTIME_START_003,
+      error_code: E_TELEGRAM_RUNTIME_START_FAILED,
       message: "resident-core lettabot startup failed",
       trace_id: serverTrace.traceId,
       turn_id: serverTrace.turnId,
@@ -225,6 +234,14 @@ export function startElectronRuntimeServices(lettabotBackend: SessionBackend): E
         stack: error instanceof Error ? error.stack : undefined,
       },
     });
+  });
+  runtimeLog({
+    level: "info",
+    decision_id: TG_RUNTIME_START_002,
+    message: "resident-core lettabot host startup dispatched",
+    trace_id: serverTrace.traceId,
+    turn_id: serverTrace.turnId,
+    data: summarizeTelegramRuntimeConfig(lettabotRuntimeConfig),
   });
 
   if (codeIslandStartup.status === "launched" && codeIslandStartup.resolution) {

@@ -41,6 +41,7 @@
 
 - `/Users/jachi/Desktop/letta-workspace/docs/observability.md`
 - `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/docs/workspace/observability.md`
+- `/Users/jachi/Desktop/letta-workspace/docs/llm-triage-playbook.md`
 
 ## 3. 每轮最少要验什么
 

@@ -3,12 +3,14 @@ import { app } from "electron";
 import { createChannelsForAgent } from "lettabot/channels/factory.js";
 import { LettaBot } from "lettabot/core/bot.js";
 import type { ChannelAdapter } from "lettabot/channels/types.js";
-import type { SessionBackend } from "lettabot/core/interfaces.js";
+import type { BotObservabilityObserver, SessionBackend } from "lettabot/core/interfaces.js";
 import type { BotConfig } from "lettabot/core/types.js";
 import type { AgentConfig } from "lettabot/config/types.js";
-import { createComponentLogger } from "../trace.js";
+import { createComponentLogger, createTraceContext, emitStructuredLog } from "../trace.js";
 import type { ResidentCoreTelegramStartupConfig } from "../config.js";
 import { createResidentCoreSessionBackend } from "./resident-core-session-backend.js";
+import { isDecisionId } from "../../../shared/decision-ids.js";
+import { isErrorCode } from "../../../shared/error-codes.js";
 
 const log = createComponentLogger("resident-core-lettabot");
 const DEFAULT_ATTACHMENTS_MAX_BYTES = 20 * 1024 * 1024;
@@ -106,6 +108,31 @@ function createDefaultBackend(options: ResidentCoreLettaBotHostOptions): Session
 	}) as unknown as SessionBackend;
 }
 
+function createResidentCoreLettaBotObserver(): BotObservabilityObserver {
+	return {
+		createTraceContext(seed = {}) {
+			return createTraceContext({
+				traceId: seed.traceId,
+				turnId: seed.turnId,
+				sessionId: seed.sessionId,
+			});
+		},
+		onEvent(event) {
+			emitStructuredLog({
+				level: event.level,
+				component: event.component ?? "resident-core-lettabot",
+				trace_id: event.traceId,
+				turn_id: event.turnId,
+				session_id: event.sessionId,
+				decision_id: isDecisionId(event.decisionId) ? event.decisionId : undefined,
+				error_code: isErrorCode(event.errorCode) ? event.errorCode : undefined,
+				message: event.message,
+				data: event.data,
+			});
+		},
+	};
+}
+
 export class ResidentCoreLettaBotHost {
 	private backend: SessionBackend | null = null;
 	private bot: ResidentCoreLettaBotHandle | null = null;
@@ -118,6 +145,7 @@ export class ResidentCoreLettaBotHost {
 		const telegram = normalizeTelegramConfig(this.options.telegram);
 		log({
 			level: "info",
+			decision_id: "LETTABOT_HOST_START_001",
 			message: "Resident Core LettaBot host start entered",
 			data: {
 				telegram: summarizeTelegramConfig(telegram),
@@ -126,6 +154,7 @@ export class ResidentCoreLettaBotHost {
 		if (!telegram) {
 			log({
 				level: "info",
+				decision_id: "LETTABOT_HOST_START_001",
 				message: "Resident Core LettaBot host idle: Telegram is not configured",
 			});
 			return;
@@ -152,7 +181,10 @@ export class ResidentCoreLettaBotHost {
 			});
 			this.bot = this.options.createBot
 				? this.options.createBot(runtimeBotConfig, backend)
-				: new LettaBot(runtimeBotConfig, { sessionBackend: backend });
+				: new LettaBot(runtimeBotConfig, {
+					sessionBackend: backend,
+					observability: createResidentCoreLettaBotObserver(),
+				});
 			log({
 				level: "info",
 				message: "Resident Core LettaBot created LettaBot",
@@ -179,6 +211,7 @@ export class ResidentCoreLettaBotHost {
 			await this.bot.start();
 			log({
 				level: "info",
+				decision_id: "LETTABOT_HOST_START_002",
 				message: "Resident Core LettaBot bot.start resolved",
 				data: {
 					channelCount: adapters.length,
@@ -191,6 +224,8 @@ export class ResidentCoreLettaBotHost {
 			this.bot = null;
 			log({
 				level: "error",
+				decision_id: "LETTABOT_HOST_START_003",
+				error_code: "E_TELEGRAM_HOST_START_FAILED",
 				message: "Resident Core LettaBot Telegram startup failed",
 				data: serializeError(error),
 			});

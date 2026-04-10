@@ -204,4 +204,67 @@ describe("ResidentCoreSessionOwner shared agent identity", () => {
 		expect(initialDesktopSession.send).toHaveBeenCalledTimes(1);
 		expect(resumedDesktopSession.send).toHaveBeenCalledTimes(1);
 	});
+
+	it("records diagnostics for Resident Core desktop session failures", async () => {
+		const diagnostics = await import("../diagnostics.js");
+		diagnostics.resetDiagnosticsForTests();
+		const failingSession = makeSession("agent-shared", "conv-desktop");
+		failingSession.send = vi.fn(async () => {
+			throw new Error("desktop send failed");
+		});
+
+		createSessionMock.mockImplementation(() => failingSession as never);
+		resumeSessionMock.mockImplementation(() => failingSession as never);
+
+		const { createResidentCoreSessionOwner } = await import("./session-owner.js");
+		const owner = createResidentCoreSessionOwner({ runtimeHost: runtimeHostMock as never });
+
+		await expect(owner.runDesktopSession({
+			prompt: "desktop fail",
+			session: {
+				id: "pending",
+				title: "desktop",
+				status: "running",
+				pendingPermissions: new Map(),
+			},
+			trace: { traceId: "trc_rc_desktop_fail" } as never,
+		})).rejects.toThrow("desktop send failed");
+
+		expect(diagnostics.getDiagnosticSummary("trc_rc_desktop_fail")).toMatchObject({
+			errorCode: "E_RESIDENT_CORE_DESKTOP_RUN_FAILED",
+			firstFailedDecisionId: "RC_DESKTOP_RUN_004",
+		});
+	});
+
+	it("records diagnostics for Resident Core bot ensure failures", async () => {
+		const diagnostics = await import("../diagnostics.js");
+		diagnostics.resetDiagnosticsForTests();
+		const failingSession = makeSession("agent-shared", "conv-bot");
+		failingSession.initialize = vi.fn(async () => {
+			throw new Error("bot init failed");
+		});
+
+		createSessionMock.mockImplementation(() => failingSession as never);
+		resumeSessionMock.mockImplementation(() => failingSession as never);
+
+		const { createResidentCoreSessionOwner } = await import("./session-owner.js");
+		const owner = createResidentCoreSessionOwner({ runtimeHost: runtimeHostMock as never });
+
+		await expect(owner.ensureBotSessionForKey({
+			config: {
+				workingDir: "/tmp/workspace",
+				allowedTools: [],
+				conversationMode: "shared",
+				reuseSession: true,
+				agentName: "ResidentCoreLettaBot",
+			},
+			convKey: "telegram:chat-1",
+			trace: { traceId: "trc_rc_bot_ensure_fail" } as never,
+		})).rejects.toThrow("bot init failed");
+
+		expect(diagnostics.getDiagnosticSummary("trc_rc_bot_ensure_fail")).toMatchObject({
+			errorCode: "E_RESIDENT_CORE_BOT_ENSURE_FAILED",
+			firstFailedDecisionId: "RC_BOT_ENSURE_003",
+		});
+	});
 });

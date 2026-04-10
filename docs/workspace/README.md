@@ -111,4 +111,5 @@ bun run build
 - `/Users/jachi/Desktop/letta-workspace/docs/repo-ownership.md`
 - `/Users/jachi/Desktop/letta-workspace/docs/update-playbook.md`
 - `/Users/jachi/Desktop/letta-workspace/docs/observability.md`
+- `/Users/jachi/Desktop/letta-workspace/docs/llm-triage-playbook.md`
 - `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/docs/workspace/testing-guide.md`

@@ -13,6 +13,26 @@ import { createComponentLogger, createTraceContext, createTurnId, type TraceCont
 import { createResidentCoreRuntimeHost } from "./runtime-host.js";
 import type { ResidentCoreRuntimeHost } from "./runtime-host.js";
 import { createResidentCoreSafetyCanUseTool } from "./safety.js";
+import {
+	RC_DESKTOP_RUN_001,
+	RC_DESKTOP_RUN_002,
+	RC_DESKTOP_RUN_003,
+	RC_DESKTOP_RUN_004,
+	RC_DESKTOP_RUN_005,
+	RC_BOT_RUN_001,
+	RC_BOT_RUN_002,
+	RC_BOT_RUN_003,
+	RC_BOT_RUN_004,
+	RC_BOT_RUN_005,
+	RC_BOT_ENSURE_001,
+	RC_BOT_ENSURE_002,
+	RC_BOT_ENSURE_003,
+} from "../../../shared/decision-ids.js";
+import {
+	E_RESIDENT_CORE_DESKTOP_RUN_FAILED,
+	E_RESIDENT_CORE_BOT_RUN_FAILED,
+	E_RESIDENT_CORE_BOT_ENSURE_FAILED,
+} from "../../../shared/error-codes.js";
 
 type DesktopSessionRecord = {
 	session: LettaSession;
@@ -71,6 +91,49 @@ function debug(msg: string, data?: Record<string, unknown>, context?: TraceConte
 	log({
 		level: "debug",
 		message: msg,
+		data,
+		trace_id: context?.traceId,
+		turn_id: context?.turnId,
+		session_id: context?.sessionId,
+	});
+}
+
+function traceInfo(context: TraceContext | undefined, message: string, decisionId: string, data?: Record<string, unknown>): void {
+	log({
+		level: "info",
+		message,
+		decision_id: decisionId as never,
+		data,
+		trace_id: context?.traceId,
+		turn_id: context?.turnId,
+		session_id: context?.sessionId,
+	});
+}
+
+function traceWarn(context: TraceContext | undefined, message: string, decisionId: string, data?: Record<string, unknown>): void {
+	log({
+		level: "warn",
+		message,
+		decision_id: decisionId as never,
+		data,
+		trace_id: context?.traceId,
+		turn_id: context?.turnId,
+		session_id: context?.sessionId,
+	});
+}
+
+function traceError(
+	context: TraceContext | undefined,
+	message: string,
+	decisionId: string,
+	errorCode: string,
+	data?: Record<string, unknown>,
+): void {
+	log({
+		level: "error",
+		message,
+		decision_id: decisionId as never,
+		error_code: errorCode as never,
 		data,
 		trace_id: context?.traceId,
 		turn_id: context?.turnId,
@@ -229,6 +292,11 @@ export class ResidentCoreSessionOwner {
 		const sessionOptions = await this.prepareDesktopSessionOptions(options.canUseTool);
 		const sharedAgentId = this.getSharedAgentId(existing?.agentId);
 		let session: LettaSession;
+		traceInfo(traceContext, "Resident Core desktop session run entered", RC_DESKTOP_RUN_001, {
+			key: normalizedKey,
+			hasExistingConversation: Boolean(existing?.conversationId),
+			hasResumeConversationId: Boolean(options.resumeConversationId),
+		});
 
 		if (existing?.conversationId) {
 			session = resumeSession(existing.conversationId, sessionOptions);
@@ -244,6 +312,10 @@ export class ResidentCoreSessionOwner {
 			await session.send(options.prompt);
 		} catch (error) {
 			if (isConversationMissingError(error)) {
+				traceWarn(traceContext, "Resident Core desktop session conversation missing; recreating session", RC_DESKTOP_RUN_002, {
+					key: normalizedKey,
+					error: error instanceof Error ? error.message : String(error),
+				});
 				this.desktopState.sessions.delete(normalizedKey);
 				this.closeDesktopSession(session);
 				session = createSession(this.getSharedAgentId(existing?.agentId), sessionOptions);
@@ -252,12 +324,15 @@ export class ResidentCoreSessionOwner {
 				this.desktopState.sessions.delete(normalizedKey);
 				this.closeDesktopSession(session);
 				if (isApprovalConflictError(error)) {
-					log({
-						level: "warn",
-						message: "desktop session saw approval conflict",
-						data: { key: normalizedKey },
+					traceWarn(traceContext, "Resident Core desktop session saw approval conflict", RC_DESKTOP_RUN_003, {
+						key: normalizedKey,
+						error: error instanceof Error ? error.message : String(error),
 					});
 				}
+				traceError(traceContext, "Resident Core desktop session run failed", RC_DESKTOP_RUN_004, E_RESIDENT_CORE_DESKTOP_RUN_FAILED, {
+					key: normalizedKey,
+					error: error instanceof Error ? error.message : String(error),
+				});
 				throw error;
 			}
 		}
@@ -271,6 +346,19 @@ export class ResidentCoreSessionOwner {
 		};
 		this.rememberSharedAgentId(nextRecord.agentId);
 		this.setDesktopSessionRecord(normalizedKey, nextRecord);
+		traceInfo(
+			{
+				...traceContext,
+				sessionId: nextRecord.conversationId ?? traceContext.sessionId,
+			},
+			"Resident Core desktop session run completed",
+			RC_DESKTOP_RUN_005,
+			{
+				key: normalizedKey,
+				conversationId: nextRecord.conversationId,
+				agentId: nextRecord.agentId,
+			},
+		);
 
 		return {
 			session,
@@ -322,6 +410,11 @@ export class ResidentCoreSessionOwner {
 		const sessionOptions = await this.prepareBotSessionOptions(options.config, options.canUseTool);
 		const sharedAgentId = this.getSharedAgentId(existing?.agentId);
 		let session: BotSession;
+		traceInfo(traceContext, "Resident Core bot session run entered", RC_BOT_RUN_001, {
+			convKey,
+			hasExistingSession: Boolean(existing?.session),
+			hasExistingConversation: Boolean(existing?.conversationId),
+		});
 
 		if (existing?.session) {
 			session = existing.session;
@@ -338,6 +431,10 @@ export class ResidentCoreSessionOwner {
 			await session.send(options.message);
 		} catch (error) {
 			if (isConversationMissingError(error)) {
+				traceWarn(traceContext, "Resident Core bot session conversation missing; recreating session", RC_BOT_RUN_002, {
+					convKey,
+					error: error instanceof Error ? error.message : String(error),
+				});
 				this.botState.sessions.delete(convKey);
 				this.closeBotSession(session);
 				session = createSession(this.getSharedAgentId(existing?.agentId), sessionOptions);
@@ -346,12 +443,15 @@ export class ResidentCoreSessionOwner {
 				this.botState.sessions.delete(convKey);
 				this.closeBotSession(session);
 				if (isApprovalConflictError(error)) {
-					log({
-						level: "warn",
-						message: "bot session saw approval conflict",
-						data: { convKey },
+					traceWarn(traceContext, "Resident Core bot session saw approval conflict", RC_BOT_RUN_003, {
+						convKey,
+						error: error instanceof Error ? error.message : String(error),
 					});
 				}
+				traceError(traceContext, "Resident Core bot session run failed", RC_BOT_RUN_004, E_RESIDENT_CORE_BOT_RUN_FAILED, {
+					convKey,
+					error: error instanceof Error ? error.message : String(error),
+				});
 				throw error;
 			}
 		}
@@ -367,6 +467,19 @@ export class ResidentCoreSessionOwner {
 		this.rememberSharedAgentId(nextRecord.agentId);
 		this.setBotSessionRecord(convKey, nextRecord);
 		debug("bot session ready", { convKey }, traceContext);
+		traceInfo(
+			{
+				...traceContext,
+				sessionId: nextRecord.conversationId ?? traceContext.sessionId,
+			},
+			"Resident Core bot session run completed",
+			RC_BOT_RUN_005,
+			{
+				convKey,
+				conversationId: nextRecord.conversationId,
+				agentId: nextRecord.agentId,
+			},
+		);
 
 		return {
 			session,
@@ -376,6 +489,10 @@ export class ResidentCoreSessionOwner {
 
 	async ensureBotSessionForKey(options: Omit<ResidentCoreBotRunOptions, "message">): Promise<BotSession> {
 		const convKey = normalizeConvKey(options.convKey);
+		const traceContext = options.trace ?? createSessionLoggerContext(convKey);
+		traceInfo(traceContext, "Resident Core ensure bot session entered", RC_BOT_ENSURE_001, {
+			convKey,
+		});
 		const existing = this.getBotSessionRecord(convKey);
 		if (existing?.session) {
 			if (!existing.initialized) {
@@ -385,6 +502,19 @@ export class ResidentCoreSessionOwner {
 					initialized: true,
 				});
 			}
+			traceInfo(
+				{
+					...traceContext,
+					sessionId: existing.conversationId ?? traceContext.sessionId,
+				},
+				"Resident Core ensure bot session reused existing session",
+				RC_BOT_ENSURE_002,
+				{
+					convKey,
+					conversationId: existing.conversationId,
+					agentId: existing.agentId,
+				},
+			);
 			return existing.session;
 		}
 
@@ -399,16 +529,38 @@ export class ResidentCoreSessionOwner {
 			session = createSession(sharedAgentId, sessionOptions);
 		}
 
-		await session.initialize();
+		try {
+			await session.initialize();
+		} catch (error) {
+			traceError(traceContext, "Resident Core ensure bot session failed", RC_BOT_ENSURE_003, E_RESIDENT_CORE_BOT_ENSURE_FAILED, {
+				convKey,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			throw error;
+		}
 		this.rememberSharedAgentId(session.agentId || existing?.agentId);
-		this.setBotSessionRecord(convKey, {
+		const record = {
 			session,
 			conversationId: session.conversationId || existing?.conversationId,
 			agentId: session.agentId || existing?.agentId,
 			initialized: true,
 			generation: (existing?.generation ?? 0) + 1,
 			lastUsedAt: Date.now(),
-		});
+		};
+		this.setBotSessionRecord(convKey, record);
+		traceInfo(
+			{
+				...traceContext,
+				sessionId: record.conversationId ?? traceContext.sessionId,
+			},
+			"Resident Core ensure bot session created session",
+			RC_BOT_ENSURE_002,
+			{
+				convKey,
+				conversationId: record.conversationId,
+				agentId: record.agentId,
+			},
+		);
 		return session;
 	}
 

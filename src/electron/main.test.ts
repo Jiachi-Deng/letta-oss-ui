@@ -24,6 +24,7 @@ const ipcMainHandleMock = vi.hoisted(() => vi.fn((key: string, handler: Function
 const lettabotHostStopMock = vi.hoisted(() => vi.fn());
 const saveAppConfigMock = vi.hoisted(() => vi.fn());
 const createResidentCoreTelegramRuntimeBundleMock = vi.hoisted(() => vi.fn());
+const recordDiagnosticEventMock = vi.hoisted(() => vi.fn());
 const bindResidentCoreServiceMock = vi.hoisted(() => vi.fn());
 const residentCoreServiceCleanupMock = vi.hoisted(() => vi.fn());
 const createResidentCoreServiceMock = vi.hoisted(() => vi.fn(() => ({
@@ -158,7 +159,7 @@ vi.mock("./libs/diagnostics.js", () => ({
 	listDiagnosticSummaries: vi.fn(() => []),
 	getDiagnosticSummary: vi.fn(() => null),
 	getLatestDiagnosticSummaryForSession: vi.fn(() => null),
-	recordDiagnosticEvent: vi.fn(),
+	recordDiagnosticEvent: recordDiagnosticEventMock,
 }));
 
 vi.mock("./libs/bundled-codeisland.js", () => ({
@@ -337,6 +338,9 @@ describe("main lifecycle", () => {
 		expect(createResidentCoreTelegramRuntimeBundleMock).toHaveBeenCalledTimes(1);
 		expect(nextHostStartMock).toHaveBeenCalledTimes(1);
 		expect(nextHostStopMock).not.toHaveBeenCalled();
+		expect(recordDiagnosticEventMock).toHaveBeenCalledWith(expect.objectContaining({
+			decision_id: "TG_RUNTIME_RELOAD_003",
+		}));
 	});
 
 	it("throws when the Telegram runtime fails to restart after saving app config", async () => {
@@ -413,5 +417,9 @@ describe("main lifecycle", () => {
 		expect(lettabotHostStopMock).toHaveBeenCalledTimes(1);
 		expect(residentCoreServiceCleanupMock).toHaveBeenCalledTimes(1);
 		expect(failingHostStartMock).toHaveBeenCalledTimes(1);
+		expect(recordDiagnosticEventMock).toHaveBeenCalledWith(expect.objectContaining({
+			decision_id: "TG_RUNTIME_RELOAD_004",
+			error_code: "E_TELEGRAM_RUNTIME_RELOAD_FAILED",
+		}));
 	});
 });

@@ -56,6 +56,7 @@
 
 - `/Users/jachi/Desktop/letta-workspace/docs/observability.md`
 - `/Users/jachi/Desktop/letta-workspace/app/letta-desktop/docs/workspace/observability.md`
+- `/Users/jachi/Desktop/letta-workspace/docs/llm-triage-playbook.md`
 
 排障时优先看：
 

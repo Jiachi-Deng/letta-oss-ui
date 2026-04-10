@@ -21,6 +21,16 @@ import {
   E_SERVER_START_FAILED,
   E_SERVER_UNEXPECTED_EXIT,
   E_STREAM_EMPTY_RESULT,
+  E_TELEGRAM_HOST_START_FAILED,
+  E_LETTABOT_CHANNEL_START_FAILED,
+  E_LETTABOT_MESSAGE_PROCESS_FAILED,
+  E_LETTABOT_BACKGROUND_RUN_FAILED,
+  E_RESIDENT_CORE_RUNTIME_PREP_FAILED,
+  E_RESIDENT_CORE_DESKTOP_RUN_FAILED,
+  E_RESIDENT_CORE_BOT_RUN_FAILED,
+  E_RESIDENT_CORE_BOT_ENSURE_FAILED,
+  E_TELEGRAM_RUNTIME_RELOAD_FAILED,
+  E_TELEGRAM_RUNTIME_START_FAILED,
   type ErrorCode,
 } from "../../shared/error-codes.js";
 import type { StructuredLogEvent } from "./trace.js";
@@ -162,6 +172,26 @@ function getSuggestedAction(errorCode?: ErrorCode): string | undefined {
       return "Inspect why the bundled Letta server child process exited before healthcheck passed.";
     case E_SERVER_UNEXPECTED_EXIT:
       return "Inspect the bundled Letta server child process for an unexpected exit after it had already been ready.";
+    case E_TELEGRAM_HOST_START_FAILED:
+      return "Inspect the Telegram bot token, channel adapter startup path, and Resident Core LettaBot host wiring.";
+    case E_LETTABOT_CHANNEL_START_FAILED:
+      return "Inspect the failing LettaBot channel adapter startup and the adapter-specific credentials or network path.";
+    case E_LETTABOT_MESSAGE_PROCESS_FAILED:
+      return "Inspect the inbound channel message trace and the Resident Core session/runtime boundary for the failing foreground run.";
+    case E_LETTABOT_BACKGROUND_RUN_FAILED:
+      return "Inspect the heartbeat/cron/background trigger path and the corresponding LettaBot session run trace.";
+    case E_RESIDENT_CORE_RUNTIME_PREP_FAILED:
+      return "Inspect the Resident Core runtime host, app config state, and provider bootstrap path before session creation.";
+    case E_RESIDENT_CORE_DESKTOP_RUN_FAILED:
+      return "Inspect the Resident Core desktop session owner path, especially session creation/resume and the first send() boundary.";
+    case E_RESIDENT_CORE_BOT_RUN_FAILED:
+      return "Inspect the Resident Core bot session owner path, especially session initialize/send and conversation recovery behavior.";
+    case E_RESIDENT_CORE_BOT_ENSURE_FAILED:
+      return "Inspect the Resident Core bot ensure-session path and why a reusable session could not be initialized or resumed.";
+    case E_TELEGRAM_RUNTIME_RELOAD_FAILED:
+      return "Inspect the save-app-config hot reload path, previous LettaBot host shutdown, and the next Telegram runtime bundle startup.";
+    case E_TELEGRAM_RUNTIME_START_FAILED:
+      return "Inspect the Telegram runtime startup path during app boot, including runtime config, host creation, and adapter startup.";
     default:
       return undefined;
   }

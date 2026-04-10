@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetDiagnosticsForTests } from "./diagnostics.js";
 
 const createResidentCoreLettaBotHostMock = vi.hoisted(() => vi.fn());
 const ensureBundledLettaServerStartedMock = vi.hoisted(() => vi.fn(async () => ({ status: "unsupported" as const })));
@@ -47,6 +48,7 @@ describe("main-runtime resident core wiring", () => {
 	beforeEach(() => {
 		vi.resetModules();
 		vi.clearAllMocks();
+		resetDiagnosticsForTests();
 	});
 
 	it("passes Telegram runtime config into the Resident Core LettaBot host", async () => {
@@ -111,5 +113,27 @@ describe("main-runtime resident core wiring", () => {
 			}),
 		);
 		expect(host.start).toHaveBeenCalledTimes(1);
+	});
+
+	it("records a diagnostic failure when Telegram runtime startup rejects", async () => {
+		const host = {
+			start: vi.fn(async () => {
+				throw new Error("telegram host start failed");
+			}),
+			stop: vi.fn(),
+			getBot: vi.fn(),
+			getBackend: vi.fn(),
+		};
+		createResidentCoreLettaBotHostMock.mockReturnValue(host);
+
+		const { startElectronRuntimeServices } = await import("./main-runtime.js");
+		startElectronRuntimeServices({ warmSession: vi.fn(), invalidateSession: vi.fn() } as never);
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		const summaries = (await import("./diagnostics.js")).listDiagnosticSummaries();
+		expect(summaries.some((summary) =>
+			summary.firstFailedDecisionId === "TG_RUNTIME_START_003"
+				&& summary.errorCode === "E_TELEGRAM_RUNTIME_START_FAILED"
+		)).toBe(true);
 	});
 });

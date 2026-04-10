@@ -65,6 +65,7 @@ bun run build
 Observability design note:
 
 - `/Users/jachi/Desktop/letta-workspace/docs/observability.md`
+- `/Users/jachi/Desktop/letta-workspace/docs/llm-triage-playbook.md`
 
 ## Release verification
 
