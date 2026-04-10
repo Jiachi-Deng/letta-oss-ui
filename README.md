@@ -1,105 +1,73 @@
-<div align="center">
+# Letta Desktop
 
-# Demo open-source UI, built using the Letta Code SDK
+这是当前 Letta 桌面产品的主 repo。
 
-[![Platform](https://img.shields.io/badge/platform-%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/letta-ai/letta-cowork/releases)
+它已经不再只是一个“示例 UI”。
 
-An example desktop application for running Letta Code agents with a visual interface.
+当前这个 fork 负责：
 
-</div>
+- Electron desktop app
+- React UI
+- settings / diagnostics
+- Resident Core wiring
+- bundled Letta server startup
+- bundled CodeIsland startup
+- Telegram 配置保存和热重载接线
 
-## What is the Letta OSS UI?
+## Local architecture
 
-This repo contains an example desktop application for running Letta Code agents with a visual interface. The code is a fork of [Claude-Cowork](https://github.com/DevAgentForge/Claude-Cowork) that replaces the Claude SDK with the [`@letta-ai/letta-code-sdk`](https://www.npmjs.com/package/@letta-ai/letta-code-sdk). It provides a native desktop GUI for interacting with [Letta Code](https://github.com/letta-ai/letta-code) agents.
+当前主链可以简化理解成：
 
-https://github.com/user-attachments/assets/570474a1-641b-404d-a1aa-50c080675773
-
-### Why Letta Code SDK?
-
-The [Letta Code SDK](https://github.com/letta-ai/letta-code-sdk) is the SDK interface to [Letta Code](https://github.com/letta-ai/letta-code). Build agents with persistent memory that learn over time.
-
-```typescript
-import { createSession, resumeSession } from '@letta-ai/letta-code-sdk';
-
-// First session - agent learns something
-const session1 = createSession();
-await session1.send('Remember: the secret word is "banana"');
-for await (const msg of session1.stream()) { /* ... */ }
-const agentId = session1.agentId;
-session1.close();
-
-// Later... agent still remembers
-await using session2 = resumeSession(agentId);
-await session2.send('What is the secret word?');
-for await (const msg of session2.stream()) {
-  if (msg.type === 'assistant') console.log(msg.content); // "banana"
-}
+```text
+Desktop UI
+-> Resident Core
+-> letta-code-sdk
+-> letta-code runtime
+-> local Letta Python server
 ```
 
-**Key concepts:**
-- **Agent** (`agentId`): Persistent entity with memory that survives across sessions
-- **Conversation** (`conversationId`): A message thread within an agent
-- **Session** (`sessionId`): A single execution/connection
+Telegram 则通过 vendored `lettabot` 接到同一个核心路径。
 
-Agents remember across conversations (via memory blocks), but each conversation has its own message history. This means you can run multiple concurrent conversations with the same agent - each conversation has its own message history while sharing the agent's persistent memory.
+## Workspace assumption
 
-## Quick Start
+这个 repo 按下面这个 workspace 布局工作：
 
-### Prerequisites
-
-- [Bun](https://bun.sh/) or Node.js 22+
-- Letta API key from [app.letta.com/settings](https://app.letta.com/settings)
-- [letta-code-sdk](https://github.com/letta-ai/letta-code-sdk) cloned locally at `../letta-code-sdk` (temporary - will be published to npm)
-
-### Environment Setup
-
-1. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Get your Letta API key from [app.letta.com/settings](https://app.letta.com/settings)
-
-3. Edit `.env` and add your API key:
-   ```bash
-   LETTA_API_KEY=your-api-key-here
-   LETTA_BASE_URL=https://api.letta.com  # This is the default
-   ```
-
-**Note:** The app defaults to the Letta API (`https://api.letta.com`). For local development, see `.env.example` for localhost configuration.
-
-### Running the App
-
-```bash
-# Clone the repository
-git clone https://github.com/letta-ai/letta-cowork.git
-cd letta-cowork
-
-# Install dependencies
-bun install
-
-# Run in development mode
-bun run dev
-```
-
-## Architecture
-
-The OSS UI uses [`@letta-ai/letta-code-sdk`](https://www.npmjs.com/package/@letta-ai/letta-code-sdk) to run agents.
-
-### How It Works
-
-1. The app spawns the Letta Code CLI as a subprocess via the SDK
-2. Communication happens via stdin/stdout JSON streaming
-3. Each task creates a new conversation on the LRU agent (via `createSession()`)
-4. Agent memory persists across conversations via memory blocks
+- `/Users/jachi/Desktop/letta-workspace/app/letta-desktop`
+- `/Users/jachi/Desktop/letta-workspace/vendor/letta-monorepo`
+- `/Users/jachi/Desktop/letta-workspace/vendor/letta-code`
+- `/Users/jachi/Desktop/letta-workspace/vendor/letta-code-sdk`
+- `/Users/jachi/Desktop/letta-workspace/vendor/lettabot`
+- `/Users/jachi/Desktop/letta-workspace/vendor/code-island`
 
 ## Development
 
 ```bash
-# Start development server (hot reload)
+cd /Users/jachi/Desktop/letta-workspace/app/letta-desktop
 bun run dev
+```
 
-# Type checking
+## Tests
+
+```bash
+bunx vitest run
+bunx tsc --project src/electron/tsconfig.json --noEmit
+```
+
+如果改动涉及 Telegram / IM 渠道层，也要继续跑：
+
+```bash
+cd /Users/jachi/Desktop/letta-workspace/vendor/lettabot
+bunx vitest run
+bunx tsc --noEmit
 bun run build
 ```
 
+## Release verification
+
+从 workspace 根目录运行：
+
+```bash
+cd /Users/jachi/Desktop/letta-workspace
+./scripts/build-release.sh
+./scripts/verify-release.sh
+```
