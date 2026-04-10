@@ -166,4 +166,42 @@ describe("ResidentCoreSessionOwner shared agent identity", () => {
 		expect(createSessionMock).toHaveBeenCalledTimes(1);
 		expect(resumeSessionMock).not.toHaveBeenCalled();
 	});
+
+	it("resumes desktop follow-up turns by conversationId instead of reusing the prior closed session object", async () => {
+		const initialDesktopSession = makeSession("agent-shared", "conv-desktop");
+		const resumedDesktopSession = makeSession("agent-shared", "conv-desktop");
+
+		createSessionMock.mockImplementation(() => initialDesktopSession as never);
+		resumeSessionMock.mockImplementation(() => resumedDesktopSession as never);
+
+		const { createResidentCoreSessionOwner } = await import("./session-owner.js");
+		const owner = createResidentCoreSessionOwner({ runtimeHost: runtimeHostMock as never });
+
+		await owner.runDesktopSession({
+			prompt: "desktop first",
+			session: {
+				id: "pending",
+				title: "desktop",
+				status: "running",
+				pendingPermissions: new Map(),
+			},
+		});
+
+		await owner.runDesktopSession({
+			prompt: "desktop second",
+			session: {
+				id: "conv-desktop",
+				title: "desktop",
+				status: "running",
+				pendingPermissions: new Map(),
+			},
+			resumeConversationId: "conv-desktop",
+		});
+
+		expect(createSessionMock).toHaveBeenCalledTimes(1);
+		expect(resumeSessionMock).toHaveBeenCalledTimes(1);
+		expect(resumeSessionMock).toHaveBeenCalledWith("conv-desktop", expect.any(Object));
+		expect(initialDesktopSession.send).toHaveBeenCalledTimes(1);
+		expect(resumedDesktopSession.send).toHaveBeenCalledTimes(1);
+	});
 });

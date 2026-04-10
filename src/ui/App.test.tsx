@@ -426,6 +426,64 @@ describe("App", () => {
 		).toBeEnabled();
 	});
 
+	it("preserves a newly started desktop session when a stale empty session list arrives afterward", async () => {
+		const user = userEvent.setup();
+		render(<App />);
+
+		await waitFor(() => {
+			expect(sendClientEventMock).toHaveBeenCalledWith({ type: "session.list" });
+		});
+
+		await user.click(screen.getByRole("button", { name: "New Task" }));
+		await user.type(screen.getByPlaceholderText("/path/to/project"), "/tmp/project");
+		await user.type(
+			screen.getByPlaceholderText("Describe the task you want agent to handle..."),
+			"Kick off the first turn",
+		);
+		await user.click(screen.getByRole("button", { name: "Start Session" }));
+
+		await waitFor(() => {
+			expect(sendClientEventMock).toHaveBeenCalledWith({
+				type: "session.start",
+				payload: {
+					title: "",
+					prompt: "Kick off the first turn",
+					cwd: "/tmp/project",
+					allowedTools: "Read,Edit,Bash",
+				},
+			});
+		});
+
+		emitServerEvent({
+			type: "session.status",
+			payload: {
+				sessionId: "conv-race",
+				status: "running",
+				title: "conv-race",
+				cwd: "/tmp/project",
+			},
+		});
+
+		emitServerEvent({
+			type: "stream.user_prompt",
+			payload: {
+				sessionId: "conv-race",
+				prompt: "Kick off the first turn",
+			},
+		});
+
+		emitServerEvent({ type: "session.list", payload: { sessions: [] } });
+
+		await waitFor(() => {
+			expect(useAppStore.getState().activeSessionId).toBe("conv-race");
+		});
+		expect(useAppStore.getState().sessions["conv-race"]).toMatchObject({
+			id: "conv-race",
+			status: "running",
+		});
+		expect(screen.queryByRole("button", { name: "Start Session" })).not.toBeInTheDocument();
+	});
+
 	it("opens the diagnostics view and renders persisted trace details", async () => {
 		const user = userEvent.setup();
 		listDiagnosticSummariesMock.mockResolvedValue([

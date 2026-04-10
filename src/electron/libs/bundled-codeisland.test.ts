@@ -256,4 +256,29 @@ describe("bundled CodeIsland observability", () => {
       ]),
     );
   });
+
+  it("resolves the development CodeIsland app from the workspace vendor build output", async () => {
+    const workspaceAppPath = "/Users/jachi/Desktop/letta-workspace/app/letta-desktop";
+    const workspaceCwd = "/Users/jachi/Desktop/letta-workspace/app/letta-desktop";
+    const expectedPath =
+      "/Users/jachi/Desktop/letta-workspace/vendor/code-island/.build/arm64-apple-macosx/release/CodeIsland.app";
+
+    existsSyncMock.mockImplementation((candidatePath: string) => candidatePath === expectedPath);
+
+    const { resolveCodeIslandApp } = await import("./bundled-codeisland.ts");
+
+    expect(
+      resolveCodeIslandApp({
+        appPath: workspaceAppPath,
+        cwd: workspaceCwd,
+        isPackaged: false,
+        platform: "darwin",
+        resourcesPath: "/Applications/Letta.app/Contents/Resources",
+        systemVersion: "14.5.0",
+      }),
+    ).toEqual({
+      appPath: expectedPath,
+      source: "dev-build",
+    });
+  });
 });

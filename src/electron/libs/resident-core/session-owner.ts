@@ -230,8 +230,8 @@ export class ResidentCoreSessionOwner {
 		const sharedAgentId = this.getSharedAgentId(existing?.agentId);
 		let session: LettaSession;
 
-		if (existing?.session) {
-			session = existing.session;
+		if (existing?.conversationId) {
+			session = resumeSession(existing.conversationId, sessionOptions);
 		} else if (options.resumeConversationId) {
 			session = resumeSession(options.resumeConversationId, sessionOptions);
 		} else {

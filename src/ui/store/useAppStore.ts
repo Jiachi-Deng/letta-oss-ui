@@ -85,6 +85,14 @@ function mergeHistoryMessages(
   return merged;
 }
 
+function shouldPreserveLocalSession(session: SessionView, activeSessionId: string | null): boolean {
+  if (session.id === activeSessionId) return true;
+  if (session.status === "running") return true;
+  if (session.messages.length > 0) return true;
+  if (session.permissionRequests.length > 0) return true;
+  return false;
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   sessions: {},
   activeSessionId: null,
@@ -132,6 +140,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     switch (event.type) {
       case "session.list": {
+        const incomingIds = new Set(event.payload.sessions.map((session) => session.id));
         const nextSessions: Record<string, SessionView> = {};
         for (const session of event.payload.sessions) {
           const existing = state.sessions[session.id] ?? createSession(session.id);
@@ -145,17 +154,24 @@ export const useAppStore = create<AppState>((set, get) => ({
           };
         }
 
+        for (const [sessionId, session] of Object.entries(state.sessions)) {
+          if (incomingIds.has(sessionId)) continue;
+          if (!shouldPreserveLocalSession(session, state.activeSessionId)) continue;
+          nextSessions[sessionId] = session;
+        }
+
         set({ sessions: nextSessions, sessionsLoaded: true });
 
-        const hasSessions = event.payload.sessions.length > 0;
+        const listedSessions = Object.values(nextSessions);
+        const hasSessions = listedSessions.length > 0;
         set({ showStartModal: !hasSessions });
 
         if (!hasSessions) {
           get().setActiveSessionId(null);
         }
 
-        if (!state.activeSessionId && event.payload.sessions.length > 0) {
-          const sorted = [...event.payload.sessions].sort((a, b) => {
+        if (!state.activeSessionId && listedSessions.length > 0) {
+          const sorted = [...listedSessions].sort((a, b) => {
             const aTime = a.updatedAt ?? a.createdAt ?? 0;
             const bTime = b.updatedAt ?? b.createdAt ?? 0;
             return aTime - bTime;
@@ -165,9 +181,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             get().setActiveSessionId(latestSession.id);
           }
         } else if (state.activeSessionId) {
-          const stillExists = event.payload.sessions.some(
-            (session) => session.id === state.activeSessionId
-          );
+          const stillExists = listedSessions.some((session) => session.id === state.activeSessionId);
           if (!stillExists) {
             get().setActiveSessionId(null);
           }

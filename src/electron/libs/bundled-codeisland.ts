@@ -234,21 +234,26 @@ function getMinimumMacOSVersionLabel(): string {
 }
 
 function getDevelopmentBuildCandidates(context: CodeIslandRuntimeContext): string[] {
-  const workspaceRoot = path.resolve(context.appPath, "../../..");
-  return [
-    path.resolve(workspaceRoot, "vendor", "code-island", ".build", "release", CODEISLAND_APP_NAME),
-    path.resolve(workspaceRoot, "vendor", "code-island", ".build", "arm64-apple-macosx", "release", CODEISLAND_APP_NAME),
-    path.resolve(workspaceRoot, "vendor", "code-island", ".build", "x86_64-apple-macosx", "release", CODEISLAND_APP_NAME),
-    path.resolve(context.appPath, "..", "code-island", ".build", "release", CODEISLAND_APP_NAME),
-    path.resolve(context.appPath, "..", "code-island", ".build", "arm64-apple-macosx", "release", CODEISLAND_APP_NAME),
-    path.resolve(context.appPath, "..", "code-island", ".build", "x86_64-apple-macosx", "release", CODEISLAND_APP_NAME),
-    path.resolve(context.cwd, "..", "code-island", ".build", "release", CODEISLAND_APP_NAME),
-    path.resolve(context.cwd, "..", "code-island", ".build", "arm64-apple-macosx", "release", CODEISLAND_APP_NAME),
-    path.resolve(context.cwd, "..", "code-island", ".build", "x86_64-apple-macosx", "release", CODEISLAND_APP_NAME),
-    path.resolve(context.cwd, "code-island", ".build", "release", CODEISLAND_APP_NAME),
-    path.resolve(context.cwd, "code-island", ".build", "arm64-apple-macosx", "release", CODEISLAND_APP_NAME),
-    path.resolve(context.cwd, "code-island", ".build", "x86_64-apple-macosx", "release", CODEISLAND_APP_NAME),
+  const candidateRoots = [
+    context.appPath,
+    path.resolve(context.appPath, ".."),
+    path.resolve(context.appPath, "../.."),
+    path.resolve(context.appPath, "../../.."),
+    context.cwd,
+    path.resolve(context.cwd, ".."),
+    path.resolve(context.cwd, "../.."),
   ];
+  const architectures = ["release", "arm64-apple-macosx/release", "x86_64-apple-macosx/release"];
+  const candidates: string[] = [];
+
+  for (const root of candidateRoots) {
+    for (const suffix of architectures) {
+      candidates.push(path.resolve(root, "vendor", "code-island", ".build", suffix, CODEISLAND_APP_NAME));
+      candidates.push(path.resolve(root, "code-island", ".build", suffix, CODEISLAND_APP_NAME));
+    }
+  }
+
+  return candidates;
 }
 
 function dedupeResolutions(resolutions: CodeIslandAppResolution[]): CodeIslandAppResolution[] {

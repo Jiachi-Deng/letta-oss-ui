@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const createResidentCoreSessionBackendMock = vi.hoisted(() => vi.fn());
 const createChannelsForAgentMock = vi.hoisted(() => vi.fn());
-const sessionManagerMock = vi.hoisted(() => vi.fn());
 
 vi.mock("electron", () => ({
 	app: {
@@ -16,10 +15,6 @@ vi.mock("./resident-core-session-backend.js", () => ({
 
 vi.mock("lettabot/channels/factory.js", () => ({
 	createChannelsForAgent: createChannelsForAgentMock,
-}));
-
-vi.mock("lettabot/core/session-manager.js", () => ({
-	SessionManager: sessionManagerMock,
 }));
 
 describe("ResidentCoreLettaBotHost", () => {
@@ -80,7 +75,6 @@ describe("ResidentCoreLettaBotHost", () => {
 		await host.start();
 
 		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledTimes(1);
-		expect(sessionManagerMock).not.toHaveBeenCalled();
 		expect(createChannelsForAgentMock).toHaveBeenCalledWith(
 			expect.objectContaining({
 				name: "ResidentCoreLettaBot",
@@ -133,7 +127,6 @@ describe("ResidentCoreLettaBotHost", () => {
 		expect(createResidentCoreSessionBackendMock).not.toHaveBeenCalled();
 		expect(createChannelsForAgentMock).not.toHaveBeenCalled();
 		expect(createBot).not.toHaveBeenCalled();
-		expect(sessionManagerMock).not.toHaveBeenCalled();
 		expect(host.getBackend()).toBeNull();
 		expect(host.getBot()).toBeNull();
 	});
