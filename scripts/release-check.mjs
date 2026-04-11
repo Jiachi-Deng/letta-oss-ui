@@ -4,6 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { loadReleaseConfig } from "./lib/release-config.js";
+import {
+  getBundledServerPrunePlan,
+  getDefaultBundledServerProfileName,
+  resolveBundledServerPackagingProfile,
+} from "./build-letta-server.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const lettaUiRoot = path.resolve(scriptDir, "..");
@@ -30,6 +35,116 @@ const pythonHome = path.join(serverRoot, "python-base", "Python.framework", "Ver
 const pythonPath = path.join(serverRoot, "venv", "bin", "python3");
 const nltkDataPath = path.join(serverRoot, "nltk_data");
 const pyvenvPath = path.join(serverRoot, "venv", "pyvenv.cfg");
+const serverManifestPath = path.join(serverRoot, "manifest.json");
+
+function isDirectExecution(metaUrl) {
+  if (!process.argv[1]) return false;
+  return path.resolve(fileURLToPath(metaUrl)) === path.resolve(process.argv[1]);
+}
+
+function getPythonAbiTag() {
+  return path.basename(pythonHome);
+}
+
+export function resolveBundledServerSizeBudgetMb(profileName = process.env.LETTA_SERVER_PROFILE ?? getDefaultBundledServerProfileName()) {
+  const override = process.env.LETTA_SERVER_SIZE_BUDGET_MB;
+  if (override) {
+    const parsed = Number(override);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error(`Invalid LETTA_SERVER_SIZE_BUDGET_MB=${JSON.stringify(override)}`);
+    }
+    return parsed;
+  }
+
+  const profile = resolveBundledServerPackagingProfile(profileName);
+  return profile.maxServerSizeMb;
+}
+
+function getDirectorySizeBytes(rootPath) {
+  let total = 0;
+  const stack = [rootPath];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+
+    for (const entry of readdirSync(current)) {
+      const entryPath = path.join(current, entry);
+      const stats = lstatSync(entryPath);
+      if (stats.isDirectory()) stack.push(entryPath);
+      else total += stats.size;
+    }
+  }
+
+  return total;
+}
+
+export function collectForbiddenBundledServerEntries(
+  rootPath,
+  profileName = process.env.LETTA_SERVER_PROFILE ?? getDefaultBundledServerProfileName(),
+) {
+  const prunePlan = getBundledServerPrunePlan(profileName);
+  const pythonAbiTag = getPythonAbiTag();
+  const sitePackagesRoot = path.join(rootPath, "venv", "lib", `python${pythonAbiTag}`, "site-packages");
+  const pythonBaseRoot = path.join(rootPath, "python-base", "Python.framework", "Versions", pythonAbiTag);
+  const forbiddenEntries = [];
+
+  for (const relativeFilePath of prunePlan.removableStageFiles) {
+    const absolutePath = path.join(rootPath, relativeFilePath);
+    if (existsSync(absolutePath)) forbiddenEntries.push(absolutePath);
+  }
+
+  for (const relativePythonBasePath of prunePlan.removablePythonBasePaths) {
+    const absolutePath = path.join(pythonBaseRoot, relativePythonBasePath);
+    if (existsSync(absolutePath)) forbiddenEntries.push(absolutePath);
+  }
+
+  for (const packageName of prunePlan.removableSitePackages) {
+    const packagePath = path.join(sitePackagesRoot, packageName);
+    if (existsSync(packagePath)) forbiddenEntries.push(packagePath);
+
+    if (!existsSync(sitePackagesRoot)) continue;
+    for (const entry of readdirSync(sitePackagesRoot)) {
+      if (entry.startsWith(`${packageName}-`) && entry.endsWith(".dist-info")) {
+        forbiddenEntries.push(path.join(sitePackagesRoot, entry));
+      }
+    }
+  }
+
+  const pipBinaryPatterns = ["pip", "pip3", "wheel"];
+  const binRoot = path.join(rootPath, "venv", "bin");
+  if (existsSync(binRoot)) {
+    for (const entry of readdirSync(binRoot)) {
+      if (
+        pipBinaryPatterns.includes(entry) ||
+        entry.startsWith("pip3.")
+      ) {
+        forbiddenEntries.push(path.join(binRoot, entry));
+      }
+    }
+  }
+
+  return forbiddenEntries;
+}
+
+export function verifyBundledServerSizeBudget(
+  rootPath,
+  profileName = process.env.LETTA_SERVER_PROFILE ?? getDefaultBundledServerProfileName(),
+) {
+  const sizeBudgetMb = resolveBundledServerSizeBudgetMb(profileName);
+  if (sizeBudgetMb == null) return null;
+
+  const sizeBytes = getDirectorySizeBytes(rootPath);
+  const sizeMb = Number((sizeBytes / 1024 / 1024).toFixed(1));
+  if (sizeMb > sizeBudgetMb) {
+    throw new Error(`Bundled LettaServer size ${sizeMb}MB exceeds ${profileName} budget ${sizeBudgetMb}MB`);
+  }
+
+  return {
+    sizeMb,
+    sizeBudgetMb,
+  };
+}
 function normalizeModelName(model) {
   const trimmed = model.trim();
   const slashIndex = trimmed.indexOf("/");
@@ -411,33 +526,77 @@ asyncio.run(main())
   }
 }
 
-if (!existsSync(appPath)) fail(`Missing app bundle at ${appPath}`);
-if (!existsSync(serverRoot)) fail(`Missing bundled LettaServer at ${serverRoot}`);
-if (!existsSync(codeIslandApp)) fail(`Missing bundled CodeIsland app at ${codeIslandApp}`);
-if (!existsSync(cliPath)) fail(`Missing bundled Letta CLI at ${cliPath}`);
-if (!existsSync(pythonPath)) fail(`Missing bundled python runtime at ${pythonPath}`);
+function verifyBundledServerManifest(profileName = process.env.LETTA_SERVER_PROFILE ?? getDefaultBundledServerProfileName()) {
+  if (!existsSync(serverManifestPath)) {
+    fail(`Missing bundled LettaServer manifest at ${serverManifestPath}`);
+  }
 
-logSection("Running staged runtime verify");
-run(process.execPath, [path.join(scriptDir, "verify-letta-server.mjs")], { cwd: lettaUiRoot });
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(serverManifestPath, "utf8"));
+  } catch (error) {
+    fail(`Could not parse bundled LettaServer manifest: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
-logSection("Checking packaged SDK invariants");
-verifyPackagedSdkInvariants();
-
-logSection("Checking bundle layout");
-const pyvenv = readFileSync(pyvenvPath, "utf8");
-if (pyvenv.includes("/opt/homebrew/") || pyvenv.includes("build-resources/") || pyvenv.includes(lettaUiRoot)) {
-  fail(`pyvenv.cfg still leaks machine/build paths:\n${pyvenv}`);
+  if (manifest.packagingProfile !== profileName) {
+    fail(
+      `Bundled LettaServer manifest profile mismatch: expected ${profileName}, got ${JSON.stringify(manifest.packagingProfile)}`,
+    );
+  }
 }
-const otool = run("otool", ["-L", pythonPath]);
-if (otool.includes("/opt/homebrew/")) {
-  fail(`Bundled python still references Homebrew runtime paths:\n${otool}`);
+
+export async function main() {
+  const profileName = process.env.LETTA_SERVER_PROFILE ?? getDefaultBundledServerProfileName();
+
+  if (!existsSync(appPath)) fail(`Missing app bundle at ${appPath}`);
+  if (!existsSync(serverRoot)) fail(`Missing bundled LettaServer at ${serverRoot}`);
+  if (!existsSync(codeIslandApp)) fail(`Missing bundled CodeIsland app at ${codeIslandApp}`);
+  if (!existsSync(cliPath)) fail(`Missing bundled Letta CLI at ${cliPath}`);
+  if (!existsSync(pythonPath)) fail(`Missing bundled python runtime at ${pythonPath}`);
+
+  logSection(`Checking packaging profile (${profileName})`);
+  verifyBundledServerManifest(profileName);
+  try {
+    const sizeCheck = verifyBundledServerSizeBudget(serverRoot, profileName);
+    const forbiddenEntries = collectForbiddenBundledServerEntries(serverRoot, profileName);
+    if (forbiddenEntries.length > 0) {
+      fail(`Forbidden bundled LettaServer content detected:\n${forbiddenEntries.slice(0, 20).join("\n")}`);
+    }
+    if (sizeCheck) {
+      console.log(
+        `[release-check] LettaServer size ${sizeCheck.sizeMb}MB within ${profileName} budget ${sizeCheck.sizeBudgetMb}MB`,
+      );
+    }
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+
+  logSection("Running staged runtime verify");
+  run(process.execPath, [path.join(scriptDir, "verify-letta-server.mjs")], { cwd: lettaUiRoot });
+
+  logSection("Checking packaged SDK invariants");
+  verifyPackagedSdkInvariants();
+
+  logSection("Checking bundle layout");
+  const pyvenv = readFileSync(pyvenvPath, "utf8");
+  if (pyvenv.includes("/opt/homebrew/") || pyvenv.includes("build-resources/") || pyvenv.includes(lettaUiRoot)) {
+    fail(`pyvenv.cfg still leaks machine/build paths:\n${pyvenv}`);
+  }
+  const otool = run("otool", ["-L", pythonPath]);
+  if (otool.includes("/opt/homebrew/")) {
+    fail(`Bundled python still references Homebrew runtime paths:\n${otool}`);
+  }
+  ensureNoMutableData(serverRoot);
+
+  logSection("Running bundle health + chat smoke");
+  await runBundleHealthSmoke();
+
+  const appSize = run("du", ["-sh", appPath]).split(/\s+/)[0];
+  const serverSize = run("du", ["-sh", serverRoot]).split(/\s+/)[0];
+  console.log(`\n[release-check] OK: ${appPath}`);
+  console.log(`[release-check] sizes app=${appSize} LettaServer=${serverSize}`);
 }
-ensureNoMutableData(serverRoot);
 
-logSection("Running bundle health + chat smoke");
-await runBundleHealthSmoke();
-
-const appSize = run("du", ["-sh", appPath]).split(/\s+/)[0];
-const serverSize = run("du", ["-sh", serverRoot]).split(/\s+/)[0];
-console.log(`\n[release-check] OK: ${appPath}`);
-console.log(`[release-check] sizes app=${appSize} LettaServer=${serverSize}`);
+if (isDirectExecution(import.meta.url)) {
+  await main();
+}

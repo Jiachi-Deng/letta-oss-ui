@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { ResidentCoreTelegramStartupConfig } from "../../electron/libs/config.js";
+import type { ResidentCoreConfig, ResidentCoreTelegramStartupConfig } from "../../electron/libs/config.js";
 
 type AppConfigState = Awaited<ReturnType<Window["electron"]["getAppConfig"]>>;
 type TelegramDmPolicy = NonNullable<ResidentCoreTelegramStartupConfig["dmPolicy"]>;
@@ -44,6 +44,19 @@ function buildTelegramConfig(
     dmPolicy,
     streaming,
     workingDir: trimmedWorkingDir || undefined,
+  };
+}
+
+function buildResidentCoreConfig(
+  token: string,
+  dmPolicy: TelegramDmPolicy,
+  streaming: boolean,
+  workingDir: string,
+): ResidentCoreConfig {
+  return {
+    channels: {
+      telegram: buildTelegramConfig(token, dmPolicy, streaming, workingDir),
+    },
   };
 }
 
@@ -103,11 +116,12 @@ export function OnboardingModal({
         LETTA_BASE_URL: trimmedBaseUrl,
         LETTA_API_KEY: trimmedApiKey || undefined,
         model: model.trim() || undefined,
-        residentCore: {
-          channels: {
-            telegram: buildTelegramConfig(telegramToken, telegramDmPolicy, telegramStreaming, telegramWorkingDir),
-          },
-        },
+        residentCore: buildResidentCoreConfig(
+          telegramToken,
+          telegramDmPolicy,
+          telegramStreaming,
+          telegramWorkingDir,
+        ),
       });
       onSaved(nextState);
       onClose?.();
@@ -219,17 +233,24 @@ export function OnboardingModal({
             <div className="rounded-2xl border border-ink-900/10 bg-surface-secondary/70 p-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-sm font-semibold text-ink-800">Telegram</div>
+                  <div className="text-sm font-semibold text-ink-800">Channels</div>
                   <p className="mt-1 text-xs text-muted">
-                    Configure the Telegram bot used by Resident Core. Leave the token blank to disable Telegram for this profile.
+                    Resident Core stores channel settings in a shared channels container. Telegram is the first supported channel in this build. Leave the Telegram token blank to keep channels disabled for this profile.
                   </p>
                 </div>
                 <div className="rounded-full bg-accent/10 px-3 py-1 text-[11px] font-medium text-accent">
-                  Optional
+                  Telegram available now
                 </div>
               </div>
 
               <div className="mt-4 grid gap-4">
+                <div className="rounded-xl border border-ink-900/10 bg-surface px-4 py-3">
+                  <div className="text-xs font-semibold text-ink-800">Telegram</div>
+                  <p className="mt-1 text-[11px] text-muted-light">
+                    Configure the first channel adapter available in this app. Future channels will appear in this same section without changing the saved config shape.
+                  </p>
+                </div>
+
                 <label className="grid gap-1.5">
                   <span className="text-xs font-medium text-muted">Bot Token</span>
                   <input
@@ -257,7 +278,7 @@ export function OnboardingModal({
                 <label className="flex items-center justify-between gap-4 rounded-xl border border-ink-900/10 bg-surface px-4 py-3">
                   <div className="grid gap-0.5">
                     <span className="text-xs font-medium text-muted">Streaming</span>
-                    <span className="text-[11px] text-muted-light">Stream Telegram replies while they are being generated.</span>
+                    <span className="text-[11px] text-muted-light">Stream Telegram replies while they are being generated. Other channels will follow the same channels container model later.</span>
                   </div>
                   <input
                     type="checkbox"

@@ -1,5 +1,5 @@
 import electron from "electron";
-import type { ResidentCoreChannelsConfig } from "./libs/config.js";
+import type { ResidentCoreConfig } from "./libs/config.js";
 import type { ClientEvent, ServerEvent } from "./types.js";
 
 electron.contextBridge.exposeInMainWorld("electron", {
@@ -41,9 +41,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
         LETTA_BASE_URL?: string;
         LETTA_API_KEY?: string;
         model?: string;
-        residentCore?: {
-            channels?: ResidentCoreChannelsConfig | null;
-        };
+        residentCore?: ResidentCoreConfig;
     }) =>
         ipcInvoke("save-app-config", config),
     selectDirectory: () => 

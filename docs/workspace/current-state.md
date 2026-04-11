@@ -14,6 +14,8 @@
 - Letta server startup glue
 - CodeIsland startup glue
 - channels runtime 设置保存和热重载接线（Telegram 是当前第一个实现）
+- app-side config/onboarding/protocol 边界已经按 `residentCore.channels` 建模，Telegram 是当前唯一已实现渠道
+- vendored `lettabot` channel factory 已改成 lazy adapter loading，当前先作为降低静态耦合的一步，不是完整插件系统
 
 ## Current surrounding repos
 

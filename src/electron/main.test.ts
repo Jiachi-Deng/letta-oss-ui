@@ -330,11 +330,13 @@ describe("main lifecycle", () => {
 				connectionType: "letta-server",
 				LETTA_BASE_URL: "https://api.letta.com",
 				residentCore: {
-					telegram: {
-						token: "next-token",
-						dmPolicy: "pairing",
-						streaming: false,
-						workingDir: "/tmp/letta-desktop-test/lettabot-next",
+					channels: {
+						telegram: {
+							token: "next-token",
+							dmPolicy: "pairing",
+							streaming: false,
+							workingDir: "/tmp/letta-desktop-test/lettabot-next",
+						},
 					},
 				},
 			},
@@ -352,11 +354,13 @@ describe("main lifecycle", () => {
 			connectionType: "letta-server",
 			LETTA_BASE_URL: "https://api.letta.com",
 			residentCore: {
-				telegram: {
-					token: "next-token",
-					dmPolicy: "pairing",
-					streaming: false,
-					workingDir: "/tmp/letta-desktop-test/lettabot-next",
+				channels: {
+					telegram: {
+						token: "next-token",
+						dmPolicy: "pairing",
+						streaming: false,
+						workingDir: "/tmp/letta-desktop-test/lettabot-next",
+					},
 				},
 			},
 		});
@@ -408,11 +412,13 @@ describe("main lifecycle", () => {
 				connectionType: "letta-server",
 				LETTA_BASE_URL: "https://api.letta.com",
 				residentCore: {
-					telegram: {
-						token: "next-token",
-						dmPolicy: "pairing",
-						streaming: false,
-						workingDir: "/tmp/letta-desktop-test/lettabot-next",
+					channels: {
+						telegram: {
+							token: "next-token",
+							dmPolicy: "pairing",
+							streaming: false,
+							workingDir: "/tmp/letta-desktop-test/lettabot-next",
+						},
 					},
 				},
 			},
@@ -459,11 +465,13 @@ describe("main lifecycle", () => {
 			connectionType: "letta-server",
 			LETTA_BASE_URL: "https://api.letta.com",
 			residentCore: {
-				telegram: {
-					token: "next-token",
-					dmPolicy: "pairing",
-					streaming: false,
-					workingDir: "/tmp/letta-desktop-test/lettabot-next",
+				channels: {
+					telegram: {
+						token: "next-token",
+						dmPolicy: "pairing",
+						streaming: false,
+						workingDir: "/tmp/letta-desktop-test/lettabot-next",
+					},
 				},
 			},
 		});
@@ -471,11 +479,13 @@ describe("main lifecycle", () => {
 			connectionType: "letta-server",
 			LETTA_BASE_URL: "https://api.letta.com",
 			residentCore: {
-				telegram: {
-					token: "next-token",
-					dmPolicy: "pairing",
-					streaming: false,
-					workingDir: "/tmp/letta-desktop-test/lettabot-next",
+				channels: {
+					telegram: {
+						token: "next-token",
+						dmPolicy: "pairing",
+						streaming: false,
+						workingDir: "/tmp/letta-desktop-test/lettabot-next",
+					},
 				},
 			},
 		});
@@ -562,11 +572,13 @@ describe("main lifecycle", () => {
 				connectionType: "letta-server",
 				LETTA_BASE_URL: "https://api.letta.com",
 				residentCore: {
-					telegram: {
-						token: "next-token",
-						dmPolicy: "pairing",
-						streaming: false,
-						workingDir: "/tmp/letta-desktop-test/lettabot-next",
+					channels: {
+						telegram: {
+							token: "next-token",
+							dmPolicy: "pairing",
+							streaming: false,
+							workingDir: "/tmp/letta-desktop-test/lettabot-next",
+						},
 					},
 				},
 			},
@@ -585,11 +597,13 @@ describe("main lifecycle", () => {
 			connectionType: "letta-server",
 			LETTA_BASE_URL: "https://api.letta.com",
 			residentCore: {
-				telegram: {
-					token: "next-token",
-					dmPolicy: "pairing",
-					streaming: false,
-					workingDir: "/tmp/letta-desktop-test/lettabot-next",
+				channels: {
+					telegram: {
+						token: "next-token",
+						dmPolicy: "pairing",
+						streaming: false,
+						workingDir: "/tmp/letta-desktop-test/lettabot-next",
+					},
 				},
 			},
 		})).resolves.toBe(nextState);
@@ -677,11 +691,13 @@ describe("main lifecycle", () => {
 				connectionType: "letta-server",
 				LETTA_BASE_URL: "https://api.letta.com",
 				residentCore: {
-					telegram: {
-						token: "next-token",
-						dmPolicy: "pairing",
-						streaming: false,
-						workingDir: "/tmp/letta-desktop-test/lettabot-next",
+					channels: {
+						telegram: {
+							token: "next-token",
+							dmPolicy: "pairing",
+							streaming: false,
+							workingDir: "/tmp/letta-desktop-test/lettabot-next",
+						},
 					},
 				},
 			},
@@ -700,11 +716,13 @@ describe("main lifecycle", () => {
 			connectionType: "letta-server",
 			LETTA_BASE_URL: "https://api.letta.com",
 			residentCore: {
-				telegram: {
-					token: "next-token",
-					dmPolicy: "pairing",
-					streaming: false,
-					workingDir: "/tmp/letta-desktop-test/lettabot-next",
+				channels: {
+					telegram: {
+						token: "next-token",
+						dmPolicy: "pairing",
+						streaming: false,
+						workingDir: "/tmp/letta-desktop-test/lettabot-next",
+					},
 				},
 			},
 		})).resolves.toBe(nextState);

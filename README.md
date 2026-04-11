@@ -14,6 +14,8 @@
 - bundled CodeIsland startup
 - channels runtime 配置保存和热重载接线
 
+默认桌面发布包现在走显式的 `telegram-lite` 打包 profile。`LettaServer` 的瘦身规则必须写在 [build-letta-server.mjs](/Users/jachi/Desktop/letta-workspace/app/letta-desktop/scripts/build-letta-server.mjs) 里，不能靠手工删某次 `.app` 产物维持。
+
 ## Local architecture
 
 当前主链可以简化理解成：
@@ -27,6 +29,9 @@ Desktop UI
 ```
 
 Telegram 则通过 vendored `lettabot` 接到同一个核心路径。
+
+app 侧配置边界现在按 `residentCore.channels` 建模。Telegram 仍然是当前第一个已落地渠道，但 settings/onboarding/runtime wiring 不再把 app 配置形状写死成 `residentCore.telegram`。
+vendored `lettabot` 的 channel factory 现在也已经改成懒加载 adapter 模块，减少了 app 当前产品路径对未启用渠道的静态耦合，但还没有做完整插件化。
 
 channels runtime reload 现在遵循：
 
@@ -113,8 +118,15 @@ cd /Users/jachi/Desktop/letta-workspace
 如果你已经在 app repo 里，手工补跑：
 
 ```bash
-bun run release:check
+bun run build:letta-server:telegram-lite
+bun run release:check:telegram-lite
 bun run evals:desktop-renderer
+```
+
+默认 arm64 发布路径：
+
+```bash
+bun run dist:mac-arm64:telegram-lite
 ```
 
 当前 `evals:desktop-renderer` 默认会覆盖：

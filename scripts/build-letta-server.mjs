@@ -37,11 +37,12 @@ const stageVenvPath = path.join(stageRoot, "venv");
 const stagePythonPath = path.join(stageVenvPath, "bin", "python3");
 const stagePythonBaseRoot = path.join(stageRoot, "python-base");
 const stageNltkDataRoot = path.join(stageRoot, "nltk_data");
-const LAYOUT_VERSION = 10;
+const LAYOUT_VERSION = 11;
+const DEFAULT_PACKAGING_PROFILE = "telegram-lite";
 const DIST_INFO_METADATA_FILES = new Set(["INSTALLER", "RECORD", "REQUESTED", "direct_url.json"]);
 const TRANSIENT_DIR_NAMES = new Set(["__pycache__", ".pytest_cache", "tests", "test", "testing"]);
 const TRANSIENT_ROOT_PREFIXES = ["server-home", "logs"];
-const REMOVABLE_SITE_PACKAGES = [
+const BASE_REMOVABLE_SITE_PACKAGES = [
   "pip",
   "setuptools",
   "wheel",
@@ -49,7 +50,7 @@ const REMOVABLE_SITE_PACKAGES = [
   "_pytest",
   "pytest_locust",
 ];
-const OPTIONAL_PRUNED_SITE_PACKAGES = [
+const TELEGRAM_LITE_OPTIONAL_SITE_PACKAGES = [
   "temporalio",
   "matplotlib",
   "matplotlib_inline",
@@ -66,10 +67,10 @@ const OPTIONAL_PRUNED_SITE_PACKAGES = [
   "langchain_classic",
   "langchain_core",
 ];
-const REMOVABLE_STAGE_FILES = [
+const BASE_REMOVABLE_STAGE_FILES = [
   path.join("app", "letta", "personas", "examples", "sqldb", "test.db"),
 ];
-const REMOVABLE_PYTHON_BASE_PATHS = [
+const BASE_REMOVABLE_PYTHON_BASE_PATHS = [
   path.join("lib", "python3.11", "site-packages"),
   path.join("lib", "python3.11", "ensurepip"),
   path.join("lib", "python3.11", "idlelib"),
@@ -78,6 +79,53 @@ const REMOVABLE_PYTHON_BASE_PATHS = [
   path.join("lib", "python3.11", "lib2to3"),
   path.join("lib", "python3.11", "tkinter"),
 ];
+
+const PACKAGING_PROFILES = {
+  "telegram-lite": {
+    description: "Default slim desktop bundle tuned for the current Telegram-first release path.",
+    optionalPrunedSitePackages: TELEGRAM_LITE_OPTIONAL_SITE_PACKAGES,
+    removableStageFiles: BASE_REMOVABLE_STAGE_FILES,
+    removablePythonBasePaths: BASE_REMOVABLE_PYTHON_BASE_PATHS,
+    maxServerSizeMb: 475,
+  },
+  full: {
+    description: "Diagnostic bundle that keeps optional Python dependencies for local debugging.",
+    optionalPrunedSitePackages: [],
+    removableStageFiles: BASE_REMOVABLE_STAGE_FILES,
+    removablePythonBasePaths: BASE_REMOVABLE_PYTHON_BASE_PATHS,
+    maxServerSizeMb: null,
+  },
+};
+
+export function resolveBundledServerPackagingProfile(profileName = process.env.LETTA_SERVER_PROFILE ?? DEFAULT_PACKAGING_PROFILE) {
+  const normalized = String(profileName || DEFAULT_PACKAGING_PROFILE).trim().toLowerCase();
+  const profile = PACKAGING_PROFILES[normalized];
+  if (!profile) {
+    throw new Error(
+      `[letta-server-build] Unsupported LETTA_SERVER_PROFILE=${JSON.stringify(profileName)}. ` +
+      `Expected one of: ${Object.keys(PACKAGING_PROFILES).join(", ")}`,
+    );
+  }
+
+  return {
+    name: normalized,
+    ...profile,
+  };
+}
+
+export function getBundledServerPrunePlan(profileName = process.env.LETTA_SERVER_PROFILE ?? DEFAULT_PACKAGING_PROFILE) {
+  const profile = resolveBundledServerPackagingProfile(profileName);
+  return {
+    profileName: profile.name,
+    removableSitePackages: [...BASE_REMOVABLE_SITE_PACKAGES, ...profile.optionalPrunedSitePackages],
+    removableStageFiles: [...profile.removableStageFiles],
+    removablePythonBasePaths: [...profile.removablePythonBasePaths],
+    transientDirNames: [...TRANSIENT_DIR_NAMES],
+    transientRootPrefixes: [...TRANSIENT_ROOT_PREFIXES],
+    distInfoMetadataFiles: [...DIST_INFO_METADATA_FILES],
+    maxServerSizeMb: profile.maxServerSizeMb,
+  };
+}
 
 function sha256File(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
@@ -173,17 +221,18 @@ function walkAndPrune(rootPath, onPrune) {
 
 function pruneBundledServerRuntime() {
   const pruned = [];
+  const prunePlan = getBundledServerPrunePlan();
   const sitePackagesRoot = path.join(
     stageVenvPath,
     "lib",
-    `python${getPythonAbiTag(buildPython.version)}`,
+    `python${getPythonAbiTag(getBuildPython().version)}`,
     "site-packages",
   );
   const binRoot = path.join(stageVenvPath, "bin");
 
   removeMatchingChildren(stageRoot, (name) => TRANSIENT_ROOT_PREFIXES.some((prefix) => name.startsWith(prefix)));
 
-  for (const relativeFilePath of REMOVABLE_STAGE_FILES) {
+  for (const relativeFilePath of prunePlan.removableStageFiles) {
     const absoluteFilePath = path.join(stageRoot, relativeFilePath);
     if (existsSync(absoluteFilePath)) {
       removePath(absoluteFilePath);
@@ -191,12 +240,12 @@ function pruneBundledServerRuntime() {
     }
   }
 
-  for (const relativePythonBasePath of REMOVABLE_PYTHON_BASE_PATHS) {
+  for (const relativePythonBasePath of prunePlan.removablePythonBasePaths) {
     const absolutePythonBasePath = path.join(
       stagePythonBaseRoot,
       "Python.framework",
       "Versions",
-      getPythonAbiTag(buildPython.version),
+      getPythonAbiTag(getBuildPython().version),
       relativePythonBasePath,
     );
     if (existsSync(absolutePythonBasePath)) {
@@ -207,9 +256,8 @@ function pruneBundledServerRuntime() {
 
   if (existsSync(sitePackagesRoot)) {
     removeMatchingChildren(sitePackagesRoot, (name) => {
-      if (REMOVABLE_SITE_PACKAGES.includes(name)) return true;
-      if (OPTIONAL_PRUNED_SITE_PACKAGES.includes(name)) return true;
-      return [...REMOVABLE_SITE_PACKAGES, ...OPTIONAL_PRUNED_SITE_PACKAGES].some(
+      if (prunePlan.removableSitePackages.includes(name)) return true;
+      return prunePlan.removableSitePackages.some(
         (base) => name.startsWith(`${base}-`) && name.endsWith(".dist-info"),
       );
     });
@@ -377,19 +425,30 @@ function resolveBuildPython() {
   process.exit(1);
 }
 
+let cachedBuildPython = null;
+
+function getBuildPython() {
+  if (!cachedBuildPython) {
+    cachedBuildPython = resolveBuildPython();
+  }
+  return cachedBuildPython;
+}
+
 function resolveInputFingerprint(pythonVersion) {
+  const prunePlan = getBundledServerPrunePlan();
   return {
     layoutVersion: LAYOUT_VERSION,
+    packagingProfile: prunePlan.profileName,
     arch: process.arch,
     pythonVersion,
     pyprojectHash: sha256File(path.join(repoRoot, "pyproject.toml")),
     uvLockHash: sha256File(path.join(repoRoot, "uv.lock")),
-    pythonFrameworkRoot: buildPython.frameworkRoot,
-    removedSitePackages: [...REMOVABLE_SITE_PACKAGES, ...OPTIONAL_PRUNED_SITE_PACKAGES],
-    transientDirNames: [...TRANSIENT_DIR_NAMES],
-    transientRootPrefixes: [...TRANSIENT_ROOT_PREFIXES],
-    distInfoMetadataFiles: [...DIST_INFO_METADATA_FILES],
-    removedPythonBasePaths: [...REMOVABLE_PYTHON_BASE_PATHS],
+    pythonFrameworkRoot: getBuildPython().frameworkRoot,
+    removedSitePackages: prunePlan.removableSitePackages,
+    transientDirNames: prunePlan.transientDirNames,
+    transientRootPrefixes: prunePlan.transientRootPrefixes,
+    distInfoMetadataFiles: prunePlan.distInfoMetadataFiles,
+    removedPythonBasePaths: prunePlan.removablePythonBasePaths,
   };
 }
 
@@ -418,7 +477,7 @@ function stageFromLocalVenv(sourceSitePackages) {
   const destinationSitePackages = path.join(
     stageVenvPath,
     "lib",
-    `python${getPythonAbiTag(buildPython.version)}`,
+    `python${getPythonAbiTag(getBuildPython().version)}`,
     "site-packages",
   );
   const editablePathFile = path.join(destinationSitePackages, "_letta.pth");
@@ -457,10 +516,10 @@ function stageFromLocalVenv(sourceSitePackages) {
   const stageFrameworkVersionRoot = path.join(
     stageFrameworkRoot,
     "Versions",
-    getPythonAbiTag(buildPython.version),
+    getPythonAbiTag(getBuildPython().version),
   );
 
-  cpSync(buildPython.frameworkRoot, stageFrameworkRoot, {
+  cpSync(getBuildPython().frameworkRoot, stageFrameworkRoot, {
     recursive: true,
     force: true,
     dereference: false,
@@ -468,22 +527,22 @@ function stageFromLocalVenv(sourceSitePackages) {
 
   // Homebrew's cellar layout is not a complete standalone macOS framework bundle.
   // Rebuild the canonical symlink structure so downstream codesign sees a valid framework.
-  resetSymlink(path.join(stageFrameworkRoot, "Versions", "Current"), getPythonAbiTag(buildPython.version));
+  resetSymlink(path.join(stageFrameworkRoot, "Versions", "Current"), getPythonAbiTag(getBuildPython().version));
   resetSymlink(path.join(stageFrameworkRoot, "Python"), path.join("Versions", "Current", "Python"));
   resetSymlink(path.join(stageFrameworkRoot, "Resources"), path.join("Versions", "Current", "Resources"));
   resetSymlink(path.join(stageFrameworkRoot, "Headers"), path.join("Versions", "Current", "Headers"));
   resetSymlink(
     path.join(stageFrameworkVersionRoot, "Headers"),
-    path.join("include", `python${getPythonAbiTag(buildPython.version)}`),
+    path.join("include", `python${getPythonAbiTag(getBuildPython().version)}`),
   );
-  resetSymlink(path.join(stageFrameworkVersionRoot, "lib", `libpython${getPythonAbiTag(buildPython.version)}.dylib`), "../Python");
+  resetSymlink(path.join(stageFrameworkVersionRoot, "lib", `libpython${getPythonAbiTag(getBuildPython().version)}.dylib`), "../Python");
   resetSymlink(
     path.join(
       stageFrameworkVersionRoot,
       "lib",
-      `python${getPythonAbiTag(buildPython.version)}`,
-      `config-${getPythonAbiTag(buildPython.version)}-darwin`,
-      `libpython${getPythonAbiTag(buildPython.version)}.dylib`,
+      `python${getPythonAbiTag(getBuildPython().version)}`,
+      `config-${getPythonAbiTag(getBuildPython().version)}-darwin`,
+      `libpython${getPythonAbiTag(getBuildPython().version)}.dylib`,
     ),
     "../../../Python",
   );
@@ -491,9 +550,9 @@ function stageFromLocalVenv(sourceSitePackages) {
     path.join(
       stageFrameworkVersionRoot,
       "lib",
-      `python${getPythonAbiTag(buildPython.version)}`,
-      `config-${getPythonAbiTag(buildPython.version)}-darwin`,
-      `libpython${getPythonAbiTag(buildPython.version)}.a`,
+      `python${getPythonAbiTag(getBuildPython().version)}`,
+      `config-${getPythonAbiTag(getBuildPython().version)}-darwin`,
+      `libpython${getPythonAbiTag(getBuildPython().version)}.a`,
     ),
     "../../../Python",
   );
@@ -507,20 +566,20 @@ function stageFromLocalVenv(sourceSitePackages) {
     stagePythonBaseRoot,
     "Python.framework",
     "Versions",
-    getPythonAbiTag(buildPython.version),
+    getPythonAbiTag(getBuildPython().version),
     "Python",
   );
-  const pythonRelativeDylibPath = `@executable_path/../../python-base/Python.framework/Versions/${getPythonAbiTag(buildPython.version)}/Python`;
+  const pythonRelativeDylibPath = `@executable_path/../../python-base/Python.framework/Versions/${getPythonAbiTag(getBuildPython().version)}/Python`;
 
   run("install_name_tool", [
     "-change",
-    path.join(buildPython.basePrefix, "Python"),
+    path.join(getBuildPython().basePrefix, "Python"),
     pythonRelativeDylibPath,
     path.join(stageVenvPath, "bin", "python3"),
   ]);
   run("install_name_tool", [
     "-change",
-    path.join(buildPython.basePrefix, "Python"),
+    path.join(getBuildPython().basePrefix, "Python"),
     pythonRelativeDylibPath,
     path.join(stageVenvPath, "bin", "python"),
   ]);
@@ -529,7 +588,7 @@ function stageFromLocalVenv(sourceSitePackages) {
     stagePythonBaseRoot,
     "Python.framework",
     "Versions",
-    getPythonAbiTag(buildPython.version),
+    getPythonAbiTag(getBuildPython().version),
     "bin",
   );
   writeFileSync(
@@ -537,7 +596,7 @@ function stageFromLocalVenv(sourceSitePackages) {
     [
       "home = BUNDLED_PYTHON_HOME",
       "include-system-site-packages = false",
-      `version = ${getFullPythonVersion(buildPython.version)}`,
+      `version = ${getFullPythonVersion(getBuildPython().version)}`,
       "executable = BUNDLED_PYTHON_EXECUTABLE",
       "command = bundled-runtime",
       "",
@@ -550,7 +609,7 @@ function stageFromLocalVenv(sourceSitePackages) {
       stagePythonBaseRoot,
       "Python.framework",
       "Versions",
-      getPythonAbiTag(buildPython.version),
+      getPythonAbiTag(getBuildPython().version),
       "Resources",
       "Python.app",
       "Contents",
@@ -566,111 +625,153 @@ function stageFromLocalVenv(sourceSitePackages) {
   }
 }
 
-const buildPython = resolveBuildPython();
-const fingerprint = resolveInputFingerprint(buildPython.version);
-const previousManifest = readManifest();
-const shouldReuse =
-  previousManifest &&
-  JSON.stringify(previousManifest.fingerprint) === JSON.stringify(fingerprint) &&
-  existsSync(stagePythonPath);
+function isDirectExecution(metaUrl) {
+  if (!process.argv[1]) return false;
+  return path.resolve(fileURLToPath(metaUrl)) === path.resolve(process.argv[1]);
+}
 
-if (shouldReuse) {
-  console.log(
-    `[letta-server-build] Reusing staged Letta server runtime at ${stageRoot}`,
+function estimateDirectorySizeMb(rootPath) {
+  return Math.round(
+    Array.from((function walk(root) {
+      const files = [];
+      const stack = [root];
+      while (stack.length > 0) {
+        const current = stack.pop();
+        if (!current) continue;
+        for (const entry of readdirSync(current)) {
+          const entryPath = path.join(current, entry);
+          const stats = lstatSync(entryPath);
+          if (stats.isDirectory()) stack.push(entryPath);
+          else files.push(stats.size);
+        }
+      }
+      return files;
+    })(rootPath)).reduce((total, size) => total + size, 0) / 1024 / 1024,
   );
-} else {
+}
+
+export function getDefaultBundledServerProfileName() {
+  return DEFAULT_PACKAGING_PROFILE;
+}
+
+export function getBundledServerPackagingProfiles() {
+  return Object.fromEntries(
+    Object.entries(PACKAGING_PROFILES).map(([name, profile]) => [name, {
+      description: profile.description,
+      maxServerSizeMb: profile.maxServerSizeMb,
+    }]),
+  );
+}
+
+export function buildBundledServerManifestVersionInfo(pythonVersion) {
+  const sourceSitePackages = resolveSourceSitePackages(getPythonAbiTag(pythonVersion));
+  return {
+    mode: sourceSitePackages ? "copied-site-packages" : "pip-install",
+  };
+}
+
+function main() {
+  const selectedProfile = resolveBundledServerPackagingProfile();
+  const buildPython = getBuildPython();
+  const fingerprint = resolveInputFingerprint(buildPython.version);
+  const previousManifest = readManifest();
+  const shouldReuse =
+    previousManifest &&
+    JSON.stringify(previousManifest.fingerprint) === JSON.stringify(fingerprint) &&
+    existsSync(stagePythonPath);
+
   console.log(
-    `[letta-server-build] Building bundled Letta server runtime with ${buildPython.command} (${buildPython.version})`,
+    `[letta-server-build] Packaging profile ${selectedProfile.name}: ${selectedProfile.description}`,
   );
 
-  rmSync(stageRoot, { recursive: true, force: true });
-  mkdirSync(stageRoot, { recursive: true });
-
-  run(buildPython.command, ["-m", "venv", "--copies", stageVenvPath], {
-    cwd: repoRoot,
-  });
-
-  const sourceSitePackages = resolveSourceSitePackages(getPythonAbiTag(buildPython.version));
-
-  if (sourceSitePackages) {
+  if (shouldReuse) {
     console.log(
-      `[letta-server-build] Reusing local site-packages from ${sourceSitePackages}`,
+      `[letta-server-build] Reusing staged Letta server runtime at ${stageRoot}`,
     );
-    stageFromLocalVenv(sourceSitePackages);
   } else {
-    console.log("[letta-server-build] Local source venv not found; falling back to pip install.");
+    console.log(
+      `[letta-server-build] Building bundled Letta server runtime with ${buildPython.command} (${buildPython.version})`,
+    );
 
-    run(stagePythonPath, ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], {
+    rmSync(stageRoot, { recursive: true, force: true });
+    mkdirSync(stageRoot, { recursive: true });
+
+    run(buildPython.command, ["-m", "venv", "--copies", stageVenvPath], {
       cwd: repoRoot,
     });
 
-    run(
-      stagePythonPath,
-      ["-m", "pip", "install", "--no-cache-dir", `${repoRoot}[desktop]`],
-      { cwd: repoRoot },
-    );
-  }
-}
+    const sourceSitePackages = resolveSourceSitePackages(getPythonAbiTag(buildPython.version));
 
-const pruned = pruneBundledServerRuntime();
-verifyBundledServerLayout();
+    if (sourceSitePackages) {
+      console.log(
+        `[letta-server-build] Reusing local site-packages from ${sourceSitePackages}`,
+      );
+      stageFromLocalVenv(sourceSitePackages);
+    } else {
+      console.log("[letta-server-build] Local source venv not found; falling back to pip install.");
 
-const importCheck = spawnSync(
-  stagePythonPath,
-  ["-c", "import letta; print(letta.__version__); print(letta.__file__)"],
-  {
-    cwd: stageRoot,
-    stdio: "pipe",
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      PYTHONHOME: path.join(
-        stagePythonBaseRoot,
-        "Python.framework",
-        "Versions",
-        getPythonAbiTag(buildPython.version),
-      ),
-      NLTK_DATA: stageNltkDataRoot,
-      PYTHONDONTWRITEBYTECODE: "1",
-    },
-  },
-);
+      run(stagePythonPath, ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], {
+        cwd: repoRoot,
+      });
 
-if (importCheck.status !== 0) {
-  console.error("[letta-server-build] Bundled runtime failed import check.");
-  process.stderr.write(importCheck.stderr || "");
-  process.stdout.write(importCheck.stdout || "");
-  process.exit(importCheck.status ?? 1);
-}
-
-const postImportPruned = pruneBundledServerRuntime();
-verifyBundledServerLayout();
-
-writeManifest({
-  fingerprint,
-  builtAt: new Date().toISOString(),
-  version: importCheck.stdout.trim().split("\n")[0],
-  mode: resolveSourceSitePackages(getPythonAbiTag(buildPython.version)) ? "copied-site-packages" : "pip-install",
-  prunedEntries: pruned.length + postImportPruned.length,
-});
-
-const finalSizeMb = Math.round(
-  Array.from((function walk(root) {
-    const files = [];
-    const stack = [root];
-    while (stack.length > 0) {
-      const current = stack.pop();
-      if (!current) continue;
-      for (const entry of readdirSync(current)) {
-        const entryPath = path.join(current, entry);
-        const stats = lstatSync(entryPath);
-        if (stats.isDirectory()) stack.push(entryPath);
-        else files.push(stats.size);
-      }
+      run(
+        stagePythonPath,
+        ["-m", "pip", "install", "--no-cache-dir", `${repoRoot}[desktop]`],
+        { cwd: repoRoot },
+      );
     }
-    return files;
-  })(stageRoot)).reduce((total, size) => total + size, 0) / 1024 / 1024,
-);
-console.log(
-  `[letta-server-build] Staged bundled Letta server runtime at ${stageRoot} (pruned ${pruned.length + postImportPruned.length} entries, approx ${finalSizeMb}MB)`,
-);
+  }
+
+  const pruned = pruneBundledServerRuntime();
+  verifyBundledServerLayout();
+
+  const importCheck = spawnSync(
+    stagePythonPath,
+    ["-c", "import letta; print(letta.__version__); print(letta.__file__)"],
+    {
+      cwd: stageRoot,
+      stdio: "pipe",
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PYTHONHOME: path.join(
+          stagePythonBaseRoot,
+          "Python.framework",
+          "Versions",
+          getPythonAbiTag(buildPython.version),
+        ),
+        NLTK_DATA: stageNltkDataRoot,
+        PYTHONDONTWRITEBYTECODE: "1",
+      },
+    },
+  );
+
+  if (importCheck.status !== 0) {
+    console.error("[letta-server-build] Bundled runtime failed import check.");
+    process.stderr.write(importCheck.stderr || "");
+    process.stdout.write(importCheck.stdout || "");
+    process.exit(importCheck.status ?? 1);
+  }
+
+  const postImportPruned = pruneBundledServerRuntime();
+  verifyBundledServerLayout();
+
+  const finalSizeMb = estimateDirectorySizeMb(stageRoot);
+  writeManifest({
+    fingerprint,
+    builtAt: new Date().toISOString(),
+    version: importCheck.stdout.trim().split("\n")[0],
+    mode: buildBundledServerManifestVersionInfo(buildPython.version).mode,
+    packagingProfile: selectedProfile.name,
+    sizeMb: finalSizeMb,
+    prunedEntries: pruned.length + postImportPruned.length,
+  });
+
+  console.log(
+    `[letta-server-build] Staged bundled Letta server runtime at ${stageRoot} (profile ${selectedProfile.name}, pruned ${pruned.length + postImportPruned.length} entries, approx ${finalSizeMb}MB)`,
+  );
+}
+
+if (isDirectExecution(import.meta.url)) {
+  main();
+}

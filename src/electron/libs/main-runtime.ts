@@ -16,7 +16,7 @@ import {
 import type { SessionBackend } from "lettabot/core/interfaces.js";
 import type { BotConfig } from "lettabot/core/types.js";
 import { getResidentCoreLettaBotRuntimeConfig, initializeAppConfig } from "./config.js";
-import type { ResidentCoreLettaBotRuntimeConfig, ResidentCoreTelegramStartupConfig } from "./config.js";
+import type { ResidentCoreChannelsConfig, ResidentCoreLettaBotRuntimeConfig } from "./config.js";
 import { createComponentLogger, createTraceContext, createTurnId } from "./trace.js";
 import { join } from "node:path";
 import { createResidentCoreSessionBackend } from "./resident-core/resident-core-session-backend.js";
@@ -43,29 +43,37 @@ export type ResidentCoreChannelsRuntimeBundle = {
   runtimeConfig: ResidentCoreLettaBotRuntimeConfig;
 };
 
-export type ResidentCoreTelegramRuntimeBundle = ResidentCoreChannelsRuntimeBundle;
-
 const runtimeLog = createComponentLogger("main-runtime");
 
-function maskTelegramToken(token?: string | null): string | null {
+function maskChannelToken(token?: string | null): string | null {
   const trimmedToken = token?.trim();
   if (!trimmedToken) return null;
   return `***${trimmedToken.slice(-4)}`;
 }
 
-function summarizeResidentCoreChannelsRuntimeConfig(config: ResidentCoreLettaBotRuntimeConfig): Record<string, unknown> {
-  const telegram: ResidentCoreTelegramStartupConfig | null = config.channels.telegram ?? null;
+function summarizeResidentCoreChannelsConfig(channels: ResidentCoreChannelsConfig): Record<string, unknown> {
+  const telegram = channels.telegram ?? null;
   return {
-    workingDir: config.workingDir,
-    channels: {
+    configuredChannelNames: Object.entries(channels)
+      .filter(([, channelConfig]) => Boolean(channelConfig))
+      .map(([channelName]) => channelName),
+    channelCount: Object.values(channels).filter(Boolean).length,
+    configuredChannels: {
       telegram: {
         hasToken: Boolean(telegram?.token?.trim()),
-        tokenTail: maskTelegramToken(telegram?.token),
+        tokenTail: maskChannelToken(telegram?.token),
         dmPolicy: telegram?.dmPolicy ?? null,
         streaming: telegram?.streaming ?? null,
         workingDir: telegram?.workingDir ?? null,
       },
     },
+  };
+}
+
+function summarizeResidentCoreChannelsRuntimeConfig(config: ResidentCoreLettaBotRuntimeConfig): Record<string, unknown> {
+  return {
+    workingDir: config.workingDir,
+    ...summarizeResidentCoreChannelsConfig(config.channels),
   };
 }
 
@@ -151,9 +159,6 @@ export function createResidentCoreChannelsRuntimeBundle(
     runtimeConfig,
   };
 }
-
-export const createResidentCoreTelegramRuntimeBundle = createResidentCoreChannelsRuntimeBundle;
-
 export function stopElectronDevelopmentServer(): void {
   if (!isDev()) {
     return;

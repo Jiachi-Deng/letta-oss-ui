@@ -15,7 +15,7 @@ import { isErrorCode } from "../../../shared/error-codes.js";
 const log = createComponentLogger("resident-core-lettabot");
 const DEFAULT_ATTACHMENTS_MAX_BYTES = 20 * 1024 * 1024;
 
-function maskTelegramToken(token?: string | null): string | null {
+function maskChannelToken(token?: string | null): string | null {
 	const trimmedToken = token?.trim();
 	if (!trimmedToken) return null;
 	return `***${trimmedToken.slice(-4)}`;
@@ -24,7 +24,7 @@ function maskTelegramToken(token?: string | null): string | null {
 function summarizeTelegramConfig(telegram: ResidentCoreTelegramStartupConfig | null): Record<string, unknown> {
 	return {
 		hasToken: Boolean(telegram?.token?.trim()),
-		tokenTail: maskTelegramToken(telegram?.token),
+		tokenTail: maskChannelToken(telegram?.token),
 		dmPolicy: telegram?.dmPolicy ?? null,
 		streaming: telegram?.streaming ?? null,
 		workingDir: telegram?.workingDir ?? null,
@@ -32,8 +32,13 @@ function summarizeTelegramConfig(telegram: ResidentCoreTelegramStartupConfig | n
 }
 
 function summarizeResidentCoreChannelsConfig(channels: ResidentCoreChannelsConfig | null): Record<string, unknown> {
+	const configuredChannelNames = getConfiguredChannelNames(channels);
 	return {
-		telegram: summarizeTelegramConfig(channels?.telegram ?? null),
+		configuredChannelNames,
+		channelCount: configuredChannelNames.length,
+		configuredChannels: {
+			telegram: summarizeTelegramConfig(channels?.telegram ?? null),
+		},
 	};
 }
 
@@ -229,7 +234,7 @@ export class ResidentCoreLettaBotHost {
 			});
 
 			const agentConfig = createResidentCoreAgentConfig(runtimeBotConfig, channels ?? {});
-			const adapters = createChannelsForAgent(agentConfig, runtimeBotConfig.workingDir, DEFAULT_ATTACHMENTS_MAX_BYTES);
+			const adapters = await createChannelsForAgent(agentConfig, runtimeBotConfig.workingDir, DEFAULT_ATTACHMENTS_MAX_BYTES);
 			log({
 				level: "info",
 				message: "Resident Core LettaBot created channel adapters",

@@ -7,9 +7,14 @@
 当前至少要把下面 4 条链路分开看：
 
 1. desktop app 内聊天
-2. channels host -> Resident Core -> runtime（Telegram 是当前第一个实现）
+2. channels host -> Resident Core -> runtime（当前配置边界已经是 channels-first，Telegram 是第一个实现）
 3. CodeIsland 拉起
 4. 打包 / 首装链路
+
+当前 `lettabot` channel factory 已经是 lazy import 形态，所以如果这层回归，优先看：
+
+- vendor factory 动态导入是否仍能解析
+- app 侧直接调用点是否还在 `await createChannelsForAgent(...)`
 
 ## 2. 现在的基本原则
 
@@ -100,6 +105,8 @@ cd /Users/jachi/Desktop/letta-workspace/app/letta-desktop
 bun run test:run
 bun run typecheck:electron
 bun run verify:resident-core
+bun run build:letta-server:telegram-lite
+bun run release:check:telegram-lite
 bun run evals:desktop-renderer -- --case example-desktop-first-message-failure
 ```
 
@@ -110,6 +117,35 @@ bun run evals:desktop-renderer -- --case example-desktop-first-message-failure
 ```bash
 cd /Users/jachi/Desktop/letta-workspace/app/letta-desktop
 bun run test:run -- src/electron/main.test.ts src/electron/libs/main-runtime.test.ts src/electron/libs/resident-core/resident-core-session-backend.test.ts src/electron/libs/resident-core/session-owner.test.ts
+```
+
+如果改动触到 app 侧 channels config/onboarding 边界，至少补跑：
+
+```bash
+cd /Users/jachi/Desktop/letta-workspace/app/letta-desktop
+bun run test:run -- src/electron/libs/config.test.ts src/electron/libs/main-runtime.test.ts src/electron/main.test.ts src/ui/components/OnboardingModal.test.tsx src/electron/libs/resident-core/lettabot-host.test.ts
+bun run typecheck:electron
+```
+
+如果改动触到 vendored channel factory / adapter 装配，至少补跑：
+
+```bash
+cd /Users/jachi/Desktop/letta-workspace/vendor/lettabot
+bun run build
+bunx tsc --noEmit
+
+cd /Users/jachi/Desktop/letta-workspace/app/letta-desktop
+bun run test:run -- src/electron/libs/resident-core/lettabot-host.test.ts src/electron/libs/main-runtime.test.ts
+bun run typecheck:electron
+```
+
+如果改动触到打包、瘦身或发布检查，至少补跑：
+
+```bash
+cd /Users/jachi/Desktop/letta-workspace/app/letta-desktop
+bun run test:run -- scripts/lib/build-letta-server.test.ts scripts/lib/release-check.test.ts
+bun run build:letta-server:telegram-lite
+bun run release:check:telegram-lite
 ```
 
 ### vendored lettabot

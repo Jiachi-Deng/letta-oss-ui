@@ -77,10 +77,16 @@ type ResidentCoreTelegramStartupConfig = {
     workingDir?: string;
 }
 
-type ResidentCoreChannelName = "telegram";
+type ResidentCoreChannelConfigMap = {
+    telegram: ResidentCoreTelegramStartupConfig;
+};
+
+type ResidentCoreChannelName = keyof ResidentCoreChannelConfigMap;
 
 type ResidentCoreChannelsConfig = Partial<
-    Record<ResidentCoreChannelName, ResidentCoreTelegramStartupConfig | null>
+    {
+        [ChannelName in ResidentCoreChannelName]: ResidentCoreChannelConfigMap[ChannelName] | null;
+    }
 >;
 
 type ResidentCoreConfig = {

@@ -47,7 +47,7 @@ describe("OnboardingModal", () => {
     } as Awaited<ReturnType<Window["electron"]["getAppConfig"]>>;
   }
 
-  it("fills and saves Telegram settings through app config", async () => {
+  it("fills and saves Telegram settings through the channels container", async () => {
     const user = userEvent.setup();
     const configState = makeConfigState();
     const nextState = makeConfigState();
@@ -55,6 +55,8 @@ describe("OnboardingModal", () => {
 
     render(<OnboardingModal configState={configState} onSaved={onSavedMock} mode="settings" />);
 
+    expect(screen.getByText("Channels")).toBeInTheDocument();
+    expect(screen.getByText("Telegram available now")).toBeInTheDocument();
     expect(screen.getByLabelText("Bot Token")).toHaveValue("telegram-token");
     expect(screen.getByLabelText("DM Policy")).toHaveValue("allowlist");
     expect(screen.getByRole("checkbox", { name: /Streaming/ })).not.toBeChecked();
@@ -134,5 +136,6 @@ describe("OnboardingModal", () => {
     expect(screen.getByRole("button", { name: "Close settings" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeInTheDocument();
+    expect(screen.getByText(/Telegram is the first supported channel in this build/i)).toBeInTheDocument();
   });
 });

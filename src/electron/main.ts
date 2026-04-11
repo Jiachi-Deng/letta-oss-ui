@@ -7,7 +7,7 @@ import { getStaticData, pollResources, stopPolling } from "./test.js";
 import { bindResidentCoreService, cleanupAllSessions, handleClientEvent, residentCoreBroadcast } from "./ipc-handlers.js";
 import type { ClientEvent } from "./types.js";
 import { getAppConfigState, getResidentCoreLettaBotRuntimeConfig, saveAppConfig } from "./libs/config.js";
-import type { LettaAppConfig, ResidentCoreLettaBotRuntimeConfig } from "./libs/config.js";
+import type { LettaAppConfig, ResidentCoreChannelsConfig, ResidentCoreLettaBotRuntimeConfig } from "./libs/config.js";
 import {
     getBundledLettaServerRuntimeStatus,
 } from "./libs/bundled-letta-server.js";
@@ -56,23 +56,37 @@ let reloadPromise: Promise<void> | null = null;
 let activeChannelsRuntimeGeneration = 0;
 const mainLog = createComponentLogger("main");
 
-function maskTelegramToken(token?: string | null): string | null {
+function maskChannelToken(token?: string | null): string | null {
     const trimmedToken = token?.trim();
     if (!trimmedToken) return null;
     return `***${trimmedToken.slice(-4)}`;
 }
 
+function summarizeResidentCoreChannelsConfig(channels: ResidentCoreChannelsConfig): Record<string, unknown> {
+    const telegram = channels.telegram ?? null;
+    return {
+        configuredChannelNames: Object.entries(channels)
+            .filter(([, channelConfig]) => Boolean(channelConfig))
+            .map(([channelName]) => channelName),
+        channelCount: Object.values(channels).filter(Boolean).length,
+        configuredChannels: {
+            telegram: {
+                hasToken: Boolean(telegram?.token?.trim()),
+                tokenTail: maskChannelToken(telegram?.token),
+                dmPolicy: telegram?.dmPolicy ?? null,
+                streaming: telegram?.streaming ?? null,
+                workingDir: telegram?.workingDir ?? null,
+            },
+        },
+    };
+}
+
 function summarizeResidentCoreLettaBotRuntimeConfig(
     config: ResidentCoreLettaBotRuntimeConfig,
 ): Record<string, unknown> {
-    const telegram = config.channels.telegram ?? null;
     return {
         workingDir: config.workingDir,
-        hasToken: Boolean(telegram?.token?.trim()),
-        tokenTail: maskTelegramToken(telegram?.token),
-        dmPolicy: telegram?.dmPolicy ?? null,
-        streaming: telegram?.streaming ?? null,
-        telegramWorkingDir: telegram?.workingDir ?? null,
+        ...summarizeResidentCoreChannelsConfig(config.channels),
     };
 }
 
@@ -201,7 +215,7 @@ async function reloadResidentCoreChannelsRuntimeUnsafe(): Promise<void> {
         message: "resident core channels runtime restart succeeded",
         data: {
             nextWorkingDir: nextRuntime.runtimeConfig.workingDir,
-            hasTelegramToken: Boolean(nextRuntime.runtimeConfig.channels.telegram?.token?.trim()),
+            ...summarizeResidentCoreChannelsConfig(nextRuntime.runtimeConfig.channels),
         },
     });
 
@@ -359,7 +373,7 @@ app.on("ready", () => {
         try {
             await reloadResidentCoreChannelsRuntime();
         } catch (error) {
-            const message = `Settings saved, but channels runtime reload failed. Desktop core is still available; check your Telegram/channel configuration and retry. ${error instanceof Error ? error.message : String(error)}`;
+            const message = `Settings saved, but channels runtime reload failed. Desktop core is still available; check your configured channel settings and retry. ${error instanceof Error ? error.message : String(error)}`;
             mainLog({
                 level: "error",
                 decision_id: TG_RUNTIME_RELOAD_004,

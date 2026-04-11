@@ -37,10 +37,16 @@ export type ResidentCoreTelegramStartupConfig = {
   workingDir?: string;
 };
 
-export type ResidentCoreChannelName = "telegram";
+export type ResidentCoreChannelConfigMap = {
+  telegram: ResidentCoreTelegramStartupConfig;
+};
+
+export type ResidentCoreChannelName = keyof ResidentCoreChannelConfigMap;
 
 export type ResidentCoreChannelsConfig = Partial<
-  Record<ResidentCoreChannelName, ResidentCoreTelegramStartupConfig | null>
+  {
+    [ChannelName in ResidentCoreChannelName]: ResidentCoreChannelConfigMap[ChannelName] | null;
+  }
 >;
 
 export type ResidentCoreConfig = {
@@ -122,8 +128,10 @@ function normalizeResidentCoreChannelsConfig(value: unknown): ResidentCoreChanne
   if (!value || typeof value !== "object") return undefined;
 
   const raw = value as Partial<Record<ResidentCoreChannelName, unknown>>;
-  const hasTelegram = Object.prototype.hasOwnProperty.call(raw, "telegram");
-  if (!hasTelegram) return undefined;
+  const hasAnyKnownChannel = (Object.keys(raw) as ResidentCoreChannelName[]).some((channelName) =>
+    channelName === "telegram",
+  );
+  if (!hasAnyKnownChannel) return undefined;
 
   const telegram = normalizeResidentCoreTelegramConfig(raw.telegram);
   return {
@@ -494,11 +502,13 @@ export function saveAppConfig(configInput: Partial<LettaAppConfig>): AppConfigSt
 }
 
 export function getResidentCoreLettaBotRuntimeConfig(): ResidentCoreLettaBotRuntimeConfig {
-  const appConfigTelegram = getAppConfigState().config.residentCore?.channels?.telegram;
-  const envTelegram = readResidentCoreTelegramFromEnv();
+  const appConfigChannels = getAppConfigState().config.residentCore?.channels ?? {};
+  const envChannels: ResidentCoreChannelsConfig = {
+    telegram: readResidentCoreTelegramFromEnv() ?? null,
+  };
   const telegram = normalizeResidentCoreTelegramConfig({
-    ...(appConfigTelegram && typeof appConfigTelegram === "object" ? appConfigTelegram : {}),
-    ...(envTelegram ?? {}),
+    ...(appConfigChannels.telegram && typeof appConfigChannels.telegram === "object" ? appConfigChannels.telegram : {}),
+    ...(envChannels.telegram ?? {}),
   });
 
   return {

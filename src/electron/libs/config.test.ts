@@ -121,4 +121,32 @@ describe("resident core config normalization", () => {
 			},
 		});
 	});
+
+	it("ignores unknown resident core channel keys and preserves the known channels container", async () => {
+		writeConfigFile({
+			connectionType: "letta-server",
+			LETTA_BASE_URL: "https://api.letta.com",
+			residentCore: {
+				channels: {
+					telegram: {
+						token: "runtime-token",
+					},
+					discord: {
+						token: "ignore-me",
+					},
+				},
+			},
+		});
+
+		const { initializeAppConfig } = await import("./config.js");
+		const result = initializeAppConfig({ packaged: true, userDataPath });
+
+		expect(result.config.residentCore).toEqual({
+			channels: {
+				telegram: {
+					token: "runtime-token",
+				},
+			},
+		});
+	});
 });
