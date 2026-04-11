@@ -79,7 +79,7 @@
 至少有这些测试面：
 
 1. desktop app 内聊天
-2. Telegram -> Resident Core -> runtime
+2. channels host -> Resident Core -> runtime（Telegram 是当前第一个实现）
 3. CodeIsland 拉起
 4. packaging / release
 
@@ -96,8 +96,9 @@
 
 ```bash
 # app
-bunx vitest run
-bunx tsc --project src/electron/tsconfig.json --noEmit
+bun run test:run
+bun run typecheck:electron
+bun run verify:resident-core
 
 # vendored lettabot
 cd /Users/jachi/Desktop/letta-workspace/vendor/lettabot
@@ -105,6 +106,8 @@ bunx vitest run
 bunx tsc --noEmit
 bun run build
 ```
+
+`verify:resident-core` 覆盖完整 Resident Core 切片：session backend、service、runtime host、safety、session owner/store、channels host、main runtime、IPC 和设置保存链路。
 
 如果你在 `app/letta-desktop` repo 里做 packaged 验收，再补一条：
 

@@ -49,11 +49,17 @@ bun run dev
 ## Tests
 
 ```bash
-bunx vitest run
-bunx tsc --project src/electron/tsconfig.json --noEmit
+bun run test:run
+bun run typecheck:electron
 ```
 
-如果改动涉及 Telegram / IM 渠道层，也要继续跑：
+如果改动涉及 Resident Core / channels runtime 接线，先跑完整 Resident Core 切片：
+
+```bash
+bun run verify:resident-core
+```
+
+如果改动涉及 vendored lettabot 或 IM 渠道层，也要继续跑：
 
 ```bash
 cd /Users/jachi/Desktop/letta-workspace/vendor/lettabot

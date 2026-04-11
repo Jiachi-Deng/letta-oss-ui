@@ -38,8 +38,9 @@
 ```bash
 # app
 cd /Users/jachi/Desktop/letta-workspace/app/letta-desktop
-bunx vitest run
-bunx tsc --project src/electron/tsconfig.json --noEmit
+bun run test:run
+bun run typecheck:electron
+bun run verify:resident-core
 
 # lettabot
 cd /Users/jachi/Desktop/letta-workspace/vendor/lettabot
@@ -47,3 +48,5 @@ bunx vitest run
 bunx tsc --noEmit
 bun run build
 ```
+
+`verify:resident-core` 覆盖完整 Resident Core 切片：session backend、service、runtime host、safety、session owner/store、channels host、main runtime、IPC 和设置保存链路。

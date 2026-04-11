@@ -7,7 +7,7 @@
 当前至少要把下面 4 条链路分开看：
 
 1. desktop app 内聊天
-2. Telegram -> Resident Core -> runtime
+2. channels host -> Resident Core -> runtime（Telegram 是当前第一个实现）
 3. CodeIsland 拉起
 4. 打包 / 首装链路
 
@@ -18,7 +18,7 @@
 如果你只看到桌面聊天正常，不代表：
 
 - Resident Core 正常
-- Telegram 正常
+- channels host 正常
 - CodeIsland 正常
 
 ### 2.2 Resident Core 问题和 UI 问题不要混着讲
@@ -54,14 +54,14 @@
 3. 至少一次工具调用正常
 4. 设置页可打开、可关闭、可保存
 
-### 3.2 Telegram 路径
+### 3.2 Channels / Telegram 路径
 
 至少验：
 
 1. bot 能收到消息
 2. 第一条消息能回
 3. 连续多条消息时不会明显卡死
-4. 保存设置后 Telegram host 能按新配置继续工作
+4. 保存设置后 channels host 能按新配置继续工作
 
 ### 3.3 CodeIsland 路径
 
@@ -95,10 +95,13 @@
 
 ```bash
 cd /Users/jachi/Desktop/letta-workspace/app/letta-desktop
-bunx vitest run
-bunx tsc --project src/electron/tsconfig.json --noEmit
+bun run test:run
+bun run typecheck:electron
+bun run verify:resident-core
 bun run evals:desktop-renderer -- --case example-desktop-first-message-failure
 ```
+
+`verify:resident-core` 会覆盖 Resident Core 相关 Electron 测试，包括 `resident-core-session-backend`、`resident-core`、`runtime-host`、`safety`、`session-owner`、`session-store`、channels host、main runtime、IPC 和设置保存链路。
 
 ### vendored lettabot
 
