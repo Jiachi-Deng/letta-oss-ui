@@ -118,18 +118,24 @@ export function sanitizeConfigSnapshot(config) {
 
   const source = config;
   const residentCore = typeof source.residentCore === "object" && source.residentCore ? source.residentCore : {};
-  const telegram = typeof residentCore.telegram === "object" && residentCore.telegram ? residentCore.telegram : {};
+  const channels = typeof residentCore.channels === "object" && residentCore.channels ? residentCore.channels : {};
+  const legacyTelegram = typeof residentCore.telegram === "object" && residentCore.telegram ? residentCore.telegram : {};
+  const telegram = typeof channels.telegram === "object" && channels.telegram
+    ? channels.telegram
+    : legacyTelegram;
 
   return {
     connectionType: source.connectionType ?? null,
     model: source.model ?? null,
     LETTA_BASE_URL: source.LETTA_BASE_URL ?? null,
     residentCore: {
-      telegram: {
-        configured: Boolean(telegram.botToken),
-        dmPolicy: telegram.dmPolicy ?? null,
-        streaming: telegram.streaming ?? null,
-        workingDir: telegram.workingDir ?? null,
+      channels: {
+        telegram: {
+          configured: Boolean(telegram.token ?? telegram.botToken),
+          dmPolicy: telegram.dmPolicy ?? null,
+          streaming: telegram.streaming ?? null,
+          workingDir: telegram.workingDir ?? null,
+        },
       },
     },
   };
@@ -138,6 +144,9 @@ export function sanitizeConfigSnapshot(config) {
 export function inferEnvironment(config, overrides = {}) {
   const connectionType = config?.connectionType ?? null;
   const model = config?.model ?? null;
+  const telegramWorkingDir = config?.residentCore?.channels?.telegram?.workingDir
+    ?? config?.residentCore?.telegram?.workingDir
+    ?? null;
   return {
     surface: overrides.surface ?? "desktop",
     mode: overrides.mode ?? "unknown",
@@ -145,7 +154,7 @@ export function inferEnvironment(config, overrides = {}) {
     provider: overrides.provider ?? connectionType ?? "unknown",
     model,
     workingDir: overrides.workingDir
-      ?? config?.residentCore?.telegram?.workingDir
+      ?? telegramWorkingDir
       ?? null,
     appVersion: overrides.appVersion ?? null,
     appRepoPath: overrides.appRepoPath ?? null,

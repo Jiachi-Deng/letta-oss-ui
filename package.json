@@ -13,8 +13,9 @@
 		"test": "bun run build:lettabot && vitest",
 		"test:run": "bun run build:lettabot && vitest run",
 		"test:resident-core": "vitest run src/electron/libs/config.test.ts src/electron/libs/diagnostics.test.ts src/electron/libs/diagnostics-persistence.test.ts src/electron/libs/main-runtime.test.ts src/electron/libs/resident-core/*.test.ts src/electron/main.test.ts src/electron/ipc-handlers.test.ts src/ui/components/OnboardingModal.test.tsx",
+		"test:scripts-lib": "vitest run scripts/lib/build-letta-server.test.ts scripts/lib/release-check.test.ts scripts/lib/incident-pack.test.ts",
 		"typecheck:electron": "tsc --project src/electron/tsconfig.json --noEmit",
-		"verify:resident-core": "bun run build:lettabot && bun run test:resident-core && bun run typecheck:electron",
+		"verify:resident-core": "bun run build:lettabot && bun run test:resident-core && bun run test:scripts-lib && bun run typecheck:electron",
 		"build:lettabot": "bun run --cwd ../../vendor/lettabot build && node ./scripts/sync-lettabot.mjs",
 		"sync:lettabot": "node ./scripts/sync-lettabot.mjs",
 		"sync:letta-code": "bun run --cwd ../../vendor/letta-code build && bun install && node ./scripts/sync-letta-code.mjs",
@@ -39,9 +40,12 @@
 		"transpile:electron": "node ./scripts/clean-stale-electron-dist.mjs && bun run sync:letta-code-sdk && bun run build:lettabot && tsc --project src/electron/tsconfig.json",
 		"dist:mac-arm64": "bun run dist:mac-arm64:telegram-lite",
 		"dist:mac-arm64:telegram-lite": "bun run sync:letta-code && bun run build:letta-server:telegram-lite && bun run build:codeisland:arm64 && bun run transpile:electron && bun run build && electron-builder --mac --arm64",
-		"dist:mac-x64": "bun run sync:letta-code && bun run build:codeisland:x64 && bun run transpile:electron && bun run build && electron-builder --mac --x64",
-		"dist:win": "bun run transpile:electron && bun run build && electron-builder --win --x64",
-		"dist:linux": "bun run transpile:electron && bun run build && electron-builder --linux --x64"
+		"dist:mac-x64": "bun run dist:mac-x64:telegram-lite",
+		"dist:mac-x64:telegram-lite": "bun run sync:letta-code && bun run build:letta-server:telegram-lite && bun run build:codeisland:x64 && bun run transpile:electron && bun run build && electron-builder --mac --x64",
+		"dist:win": "bun run dist:win:telegram-lite",
+		"dist:win:telegram-lite": "bun run build:letta-server:telegram-lite && bun run transpile:electron && bun run build && electron-builder --win --x64",
+		"dist:linux": "bun run dist:linux:telegram-lite",
+		"dist:linux:telegram-lite": "bun run build:letta-server:telegram-lite && bun run transpile:electron && bun run build && electron-builder --linux --x64"
 	},
 	"dependencies": {
 		"@letta-ai/letta-code": "file:../../vendor/letta-code",

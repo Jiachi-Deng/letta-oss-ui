@@ -110,7 +110,7 @@ bun run release:check:telegram-lite
 bun run evals:desktop-renderer -- --case example-desktop-first-message-failure
 ```
 
-`verify:resident-core` 会覆盖 Resident Core 相关 Electron 测试，包括 `resident-core-session-backend`、`resident-core`、`runtime-host`、`safety`、`session-owner`、`session-store`、channels host、main runtime、IPC 和设置保存链路。
+`verify:resident-core` 会覆盖 Resident Core 相关 Electron 测试，包括 `resident-core-session-backend`、`resident-core`、`runtime-host`、`safety`、`session-owner`、`session-store`、channels host、main runtime、IPC、设置保存链路，以及 `scripts/lib` 下的打包/profile/incident-pack guardrail 测试。
 
 如果改动触到 channels runtime reload / rollback / bot session invalidation，至少补跑：
 

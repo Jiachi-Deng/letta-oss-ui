@@ -17,7 +17,7 @@
 
 关键点：
 
-- `dist:mac-arm64` 会重新运行 `build:letta-server`
+- 所有默认 `dist:*` 发布脚本都会先重新运行 `build:letta-server`
 - `build:letta-server` 会重新生成 `build-resources/LettaServer`
 - 所以如果你只是手工删某个 `.app` 或某个 staging 目录，下次重打包还是会回到脚本定义的内容
 
@@ -28,6 +28,14 @@ cd /Users/jachi/Desktop/letta-workspace/app/letta-desktop
 bun run build:letta-server:telegram-lite
 bun run dist:mac-arm64:telegram-lite
 bun run release:check:telegram-lite -- --app /absolute/path/to/Letta.app
+```
+
+其它默认发布脚本现在也走同一条瘦身路径：
+
+```bash
+bun run dist:mac-x64
+bun run dist:win
+bun run dist:linux
 ```
 
 如果要永久裁掉某些 Python 内容，改脚本规则，不要改产物副本。

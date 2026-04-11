@@ -51,11 +51,13 @@ describe("incident pack helpers", () => {
       LETTA_BASE_URL: "https://api.example.com",
       LETTA_API_KEY: "secret-value",
       residentCore: {
-        telegram: {
-          botToken: "telegram-secret",
-          dmPolicy: "open",
-          streaming: true,
-          workingDir: "/tmp/work",
+        channels: {
+          telegram: {
+            token: "telegram-secret",
+            dmPolicy: "open",
+            streaming: true,
+            workingDir: "/tmp/work",
+          },
         },
       },
     });
@@ -65,16 +67,61 @@ describe("incident pack helpers", () => {
       model: "lc-minimax/MiniMax-M2.7",
       LETTA_BASE_URL: "https://api.example.com",
       residentCore: {
-        telegram: {
-          configured: true,
-          dmPolicy: "open",
-          streaming: true,
-          workingDir: "/tmp/work",
+        channels: {
+          telegram: {
+            configured: true,
+            dmPolicy: "open",
+            streaming: true,
+            workingDir: "/tmp/work",
+          },
         },
       },
     });
     expect(JSON.stringify(sanitized)).not.toContain("secret-value");
     expect(JSON.stringify(sanitized)).not.toContain("telegram-secret");
+  });
+
+  it("preserves compatibility with legacy residentCore.telegram snapshots", () => {
+    const sanitized = sanitizeConfigSnapshot({
+      residentCore: {
+        telegram: {
+          botToken: "legacy-secret",
+          dmPolicy: "pairing",
+          workingDir: "/tmp/legacy",
+        },
+      },
+    });
+
+    expect(sanitized).toMatchObject({
+      residentCore: {
+        channels: {
+          telegram: {
+            configured: true,
+            dmPolicy: "pairing",
+            streaming: null,
+            workingDir: "/tmp/legacy",
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(sanitized)).not.toContain("legacy-secret");
+  });
+
+  it("infers the working directory from the channels container", async () => {
+    const { inferEnvironment } = await import("./incident-pack.js");
+
+    const environment = inferEnvironment({
+      connectionType: "letta-server",
+      residentCore: {
+        channels: {
+          telegram: {
+            workingDir: "/tmp/channels-dir",
+          },
+        },
+      },
+    });
+
+    expect(environment.workingDir).toBe("/tmp/channels-dir");
   });
 
   it("creates an incident pack with environment and trace data", () => {
