@@ -84,6 +84,7 @@ export type ResidentCoreBotRunOptions = {
 
 const DEFAULT_CWD = process.cwd();
 const DEBUG = process.env.DEBUG_RUNNER === "true";
+const DESKTOP_INIT_RETRY_DELAYS_MS = [150, 400];
 const log = createComponentLogger("resident-core-session-owner");
 
 function debug(msg: string, data?: Record<string, unknown>, context?: TraceContext): void {
@@ -183,6 +184,15 @@ function isApprovalConflictError(error: unknown): boolean {
 	return lower.includes("approval") && lower.includes("conflict");
 }
 
+function isInitMessageMissingError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.toLowerCase().includes("no init message received");
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class ResidentCoreSessionOwner {
 	private readonly runtimeHost: ResidentCoreRuntimeHost;
 	private readonly desktopState: NamespaceState<LettaSession>;
@@ -226,11 +236,11 @@ export class ResidentCoreSessionOwner {
 		}
 	}
 
-	private prepareDesktopSessionOptions(canUseTool?: CanUseToolCallback) {
+	private prepareDesktopSessionOptions(cwd?: string, canUseTool?: CanUseToolCallback) {
 		const appConfigState = this.runtimeHost.getAppConfigState();
 		return this.runtimeHost.prepareRuntimeConnection(appConfigState.config, createSessionLoggerContext())
 			.then((runtimeConnection) => ({
-				cwd: DEFAULT_CWD,
+				cwd: cwd || DEFAULT_CWD,
 				permissionMode: "bypassPermissions" as const,
 				canUseTool,
 				model: runtimeConnection.modelHandle,
@@ -289,13 +299,15 @@ export class ResidentCoreSessionOwner {
 		const cachedKey = options.resumeConversationId || options.session.id;
 		const normalizedKey = normalizeConvKey(cachedKey);
 		const existing = this.getDesktopSessionRecord(normalizedKey);
-		const sessionOptions = await this.prepareDesktopSessionOptions(options.canUseTool);
+		const sessionOptions = await this.prepareDesktopSessionOptions(options.session.cwd, options.canUseTool);
 		const sharedAgentId = this.getSharedAgentId(existing?.agentId);
 		let session: LettaSession;
 		traceInfo(traceContext, "Resident Core desktop session run entered", RC_DESKTOP_RUN_001, {
 			key: normalizedKey,
 			hasExistingConversation: Boolean(existing?.conversationId),
 			hasResumeConversationId: Boolean(options.resumeConversationId),
+			cliPath: process.env.LETTA_CLI_PATH,
+			baseUrl: process.env.LETTA_BASE_URL,
 		});
 
 		if (existing?.conversationId) {
@@ -310,7 +322,8 @@ export class ResidentCoreSessionOwner {
 
 		try {
 			await session.send(options.prompt);
-		} catch (error) {
+		} catch (initialError) {
+			let error = initialError;
 			if (isConversationMissingError(error)) {
 				traceWarn(traceContext, "Resident Core desktop session conversation missing; recreating session", RC_DESKTOP_RUN_002, {
 					key: normalizedKey,
@@ -320,6 +333,54 @@ export class ResidentCoreSessionOwner {
 				this.closeDesktopSession(session);
 				session = createSession(this.getSharedAgentId(existing?.agentId), sessionOptions);
 				await session.send(options.prompt);
+			} else if (isInitMessageMissingError(error)) {
+				this.desktopState.sessions.delete(normalizedKey);
+				this.closeDesktopSession(session);
+
+				let recovered = false;
+				for (let attemptIndex = 0; attemptIndex < DESKTOP_INIT_RETRY_DELAYS_MS.length; attemptIndex += 1) {
+					const delayMs = DESKTOP_INIT_RETRY_DELAYS_MS[attemptIndex];
+					traceWarn(traceContext, "Resident Core desktop session init missing; retrying with a fresh session", RC_DESKTOP_RUN_002, {
+						key: normalizedKey,
+						cwd: options.session.cwd || DEFAULT_CWD,
+						attempt: attemptIndex + 1,
+						delayMs,
+						cliPath: process.env.LETTA_CLI_PATH,
+						baseUrl: process.env.LETTA_BASE_URL,
+						error: error instanceof Error ? error.message : String(error),
+					});
+					await sleep(delayMs);
+					const refreshedSessionOptions = await this.prepareDesktopSessionOptions(options.session.cwd, options.canUseTool);
+					session = createSession(this.getSharedAgentId(existing?.agentId), refreshedSessionOptions);
+					try {
+						await session.send(options.prompt);
+						recovered = true;
+						break;
+					} catch (retryError) {
+						error = retryError;
+						this.closeDesktopSession(session);
+						if (!isInitMessageMissingError(retryError)) {
+							break;
+						}
+					}
+				}
+
+				if (!recovered) {
+					if (isApprovalConflictError(error)) {
+						traceWarn(traceContext, "Resident Core desktop session saw approval conflict", RC_DESKTOP_RUN_003, {
+							key: normalizedKey,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					traceError(traceContext, "Resident Core desktop session run failed", RC_DESKTOP_RUN_004, E_RESIDENT_CORE_DESKTOP_RUN_FAILED, {
+						key: normalizedKey,
+						cwd: options.session.cwd || DEFAULT_CWD,
+						cliPath: process.env.LETTA_CLI_PATH,
+						baseUrl: process.env.LETTA_BASE_URL,
+						error: error instanceof Error ? error.message : String(error),
+					});
+					throw error;
+				}
 			} else {
 				this.desktopState.sessions.delete(normalizedKey);
 				this.closeDesktopSession(session);
@@ -331,6 +392,8 @@ export class ResidentCoreSessionOwner {
 				}
 				traceError(traceContext, "Resident Core desktop session run failed", RC_DESKTOP_RUN_004, E_RESIDENT_CORE_DESKTOP_RUN_FAILED, {
 					key: normalizedKey,
+					cliPath: process.env.LETTA_CLI_PATH,
+					baseUrl: process.env.LETTA_BASE_URL,
 					error: error instanceof Error ? error.message : String(error),
 				});
 				throw error;

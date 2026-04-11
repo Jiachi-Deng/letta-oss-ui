@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import { app } from "electron";
+import { mkdirSync } from "node:fs";
 import { DEV_PORT, isDev } from "../util.js";
 import {
   configureBundledLettaServerEnv,
@@ -85,6 +86,13 @@ function configureRuntimeIdentity(): void {
   }
 }
 
+function configureUserDataOverrideFromEnv(): void {
+  const overridePath = process.env.LETTA_USER_DATA_PATH?.trim();
+  if (!overridePath) return;
+  mkdirSync(overridePath, { recursive: true });
+  app.setPath("userData", overridePath);
+}
+
 function configureLettaCliPathFromSystem(): void {
   if (app.isPackaged) {
     return;
@@ -105,6 +113,7 @@ function configureLettaCliPathFromSystem(): void {
 
 export function bootstrapElectronRuntime(): void {
   configureRuntimeIdentity();
+  configureUserDataOverrideFromEnv();
   configureBundledLettaServerEnv();
   initializeAppConfig();
   configureLettaCliPathFromSystem();

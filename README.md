@@ -76,3 +76,28 @@ cd /Users/jachi/Desktop/letta-workspace
 ./scripts/build-release.sh
 ./scripts/verify-release.sh
 ```
+
+更推荐的完整路径是：
+
+```bash
+cd /Users/jachi/Desktop/letta-workspace
+./scripts/release-pipeline.sh
+```
+
+如果任务涉及 DMG / ZIP / `/Applications/Letta.app` 真机首装，再先读：
+
+- `/Users/jachi/Desktop/letta-workspace/docs/packaging-playbook.md`
+
+如果你已经在 app repo 里，手工补跑：
+
+```bash
+bun run release:check
+bun run evals:desktop-renderer
+```
+
+当前 `evals:desktop-renderer` 默认会覆盖：
+
+- 首条消息
+- 多轮聊天
+- 多类工具调用
+- 设置页校验错误提示

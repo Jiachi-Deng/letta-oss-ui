@@ -205,6 +205,114 @@ describe("ResidentCoreSessionOwner shared agent identity", () => {
 		expect(resumedDesktopSession.send).toHaveBeenCalledTimes(1);
 	});
 
+	it("passes the desktop session cwd through to the runtime session options", async () => {
+		const desktopSession = makeSession("agent-shared", "conv-desktop");
+		createSessionMock.mockImplementation(() => desktopSession as never);
+
+		const { createResidentCoreSessionOwner } = await import("./session-owner.js");
+		const owner = createResidentCoreSessionOwner({ runtimeHost: runtimeHostMock as never });
+
+		await owner.runDesktopSession({
+			prompt: "desktop first",
+			session: {
+				id: "pending",
+				title: "desktop",
+				status: "running",
+				cwd: "/Users/jachi/Documents/OnlySpecs",
+				pendingPermissions: new Map(),
+			},
+		});
+
+		expect(createSessionMock).toHaveBeenCalledWith(
+			undefined,
+			expect.objectContaining({
+				cwd: "/Users/jachi/Documents/OnlySpecs",
+			}),
+		);
+	});
+
+	it("retries a desktop run with a fresh session when the init message is missing", async () => {
+		const failingSession = makeSession("agent-shared", "conv-desktop");
+		failingSession.send = vi.fn(async () => {
+			throw new Error("Failed to initialize session - no init message received");
+		});
+		const retryingSession = makeSession("agent-shared", "conv-desktop-2");
+		retryingSession.send = vi.fn(async () => {
+			throw new Error("Failed to initialize session - no init message received");
+		});
+		const recoveredSession = makeSession("agent-shared", "conv-desktop-3");
+
+		createSessionMock
+			.mockImplementationOnce(() => failingSession as never)
+			.mockImplementationOnce(() => retryingSession as never)
+			.mockImplementationOnce(() => recoveredSession as never);
+
+		const { createResidentCoreSessionOwner } = await import("./session-owner.js");
+		const owner = createResidentCoreSessionOwner({ runtimeHost: runtimeHostMock as never });
+
+		await owner.runDesktopSession({
+			prompt: "desktop first",
+			session: {
+				id: "pending",
+				title: "desktop",
+				status: "running",
+				cwd: "/Users/jachi/Documents/OnlySpecs",
+				pendingPermissions: new Map(),
+			},
+		});
+
+		expect(createSessionMock).toHaveBeenCalledTimes(3);
+		expect(failingSession.close).toHaveBeenCalledTimes(1);
+		expect(retryingSession.close).toHaveBeenCalledTimes(1);
+		expect(failingSession.send).toHaveBeenCalledTimes(1);
+		expect(retryingSession.send).toHaveBeenCalledTimes(1);
+		expect(recoveredSession.send).toHaveBeenCalledTimes(1);
+		expect(createSessionMock).toHaveBeenNthCalledWith(
+			3,
+			undefined,
+			expect.objectContaining({
+				cwd: "/Users/jachi/Documents/OnlySpecs",
+			}),
+		);
+	});
+
+	it("records a desktop run failure after exhausting init retries", async () => {
+		const diagnostics = await import("../diagnostics.js");
+		diagnostics.resetDiagnosticsForTests();
+		const failingSession = makeSession("agent-shared", "conv-desktop");
+		failingSession.send = vi.fn(async () => {
+			throw new Error("Failed to initialize session - no init message received");
+		});
+
+		createSessionMock.mockImplementation(() => ({
+			...failingSession,
+			send: vi.fn(async () => {
+				throw new Error("Failed to initialize session - no init message received");
+			}),
+			close: vi.fn(),
+		}) as never);
+
+		const { createResidentCoreSessionOwner } = await import("./session-owner.js");
+		const owner = createResidentCoreSessionOwner({ runtimeHost: runtimeHostMock as never });
+
+		await expect(owner.runDesktopSession({
+			prompt: "desktop fail",
+			session: {
+				id: "pending",
+				title: "desktop",
+				status: "running",
+				cwd: "/Users/jachi/Documents/OnlySpecs",
+				pendingPermissions: new Map(),
+			},
+			trace: { traceId: "trc_rc_desktop_init_retry_fail" } as never,
+		})).rejects.toThrow("Failed to initialize session - no init message received");
+
+		expect(diagnostics.getDiagnosticSummary("trc_rc_desktop_init_retry_fail")).toMatchObject({
+			errorCode: "E_RESIDENT_CORE_DESKTOP_RUN_FAILED",
+			firstFailedDecisionId: "RC_DESKTOP_RUN_004",
+		});
+	});
+
 	it("records diagnostics for Resident Core desktop session failures", async () => {
 		const diagnostics = await import("../diagnostics.js");
 		diagnostics.resetDiagnosticsForTests();

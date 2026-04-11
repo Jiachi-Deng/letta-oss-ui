@@ -66,6 +66,7 @@
 ./scripts/doctor.sh
 ./scripts/repo-status.sh
 ./scripts/dev.sh
+./scripts/release-pipeline.sh
 ./scripts/build-release.sh
 ./scripts/verify-release.sh
 ./scripts/retest-first-install.sh
@@ -82,6 +83,10 @@
 3. CodeIsland 拉起
 4. packaging / release
 
+如果是 packaged / 首装问题，先读：
+
+- `/Users/jachi/Desktop/letta-workspace/docs/packaging-playbook.md`
+
 常用命令：
 
 ```bash
@@ -94,6 +99,12 @@ cd /Users/jachi/Desktop/letta-workspace/vendor/lettabot
 bunx vitest run
 bunx tsc --noEmit
 bun run build
+```
+
+如果你在 `app/letta-desktop` repo 里做 packaged 验收，再补一条：
+
+```bash
+bun run release:check
 ```
 
 ## 7. Telegram 配置

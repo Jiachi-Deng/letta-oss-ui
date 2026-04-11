@@ -14,6 +14,7 @@
 - [error-codes.ts](/Users/jachi/Desktop/letta-workspace/app/letta-desktop/src/shared/error-codes.ts)
 - [diagnostics-format.ts](/Users/jachi/Desktop/letta-workspace/app/letta-desktop/src/shared/diagnostics-format.ts)
 - [DiagnosticsPanel.tsx](/Users/jachi/Desktop/letta-workspace/app/letta-desktop/src/ui/components/DiagnosticsPanel.tsx)
+- incident archive at `~/Library/Application Support/Letta/diagnostics/incidents.json`
 
 ## 当前目标
 

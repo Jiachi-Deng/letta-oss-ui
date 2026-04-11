@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,7 @@ const resourcesRoot = path.join(appPath, "Contents", "Resources");
 const serverRoot = path.join(resourcesRoot, "LettaServer");
 const codeIslandApp = path.join(resourcesRoot, "CodeIsland.app");
 const cliPath = path.join(resourcesRoot, "app.asar.unpacked", "node_modules", "@letta-ai", "letta-code", "letta.js");
+const appExecutable = path.join(appPath, "Contents", "MacOS", "Letta");
 const pythonHome = path.join(serverRoot, "python-base", "Python.framework", "Versions", "3.11");
 const pythonPath = path.join(serverRoot, "venv", "bin", "python3");
 const nltkDataPath = path.join(serverRoot, "nltk_data");
@@ -100,6 +101,82 @@ function sleep(ms) {
 
 function logSection(title) {
   console.log(`\n[release-check] ${title}`);
+}
+
+function verifyPackagedSdkInvariants() {
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), "letta-release-sdk."));
+  const scriptPath = path.join(tmpDir, "sdk-invariant.mjs");
+
+  const script = `
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const resourcesRoot = process.argv[2];
+const sdkPath = path.join(resourcesRoot, "app.asar", "node_modules", "@letta-ai", "letta-code-sdk", "dist", "index.js");
+const unpackedCli = path.join(resourcesRoot, "app.asar.unpacked", "node_modules", "@letta-ai", "letta-code", "letta.js");
+const nestedSdk = path.join(resourcesRoot, "app.asar.unpacked", "node_modules", "lettabot", "node_modules", "@letta-ai", "letta-code-sdk");
+const nestedCli = path.join(resourcesRoot, "app.asar.unpacked", "node_modules", "lettabot", "node_modules", "@letta-ai", "letta-code");
+
+console.log(JSON.stringify({
+  unpackedCliExists: existsSync(unpackedCli),
+  nestedSdkExists: existsSync(nestedSdk),
+  nestedCliExists: existsSync(nestedCli),
+}));
+
+process.env.LETTA_BASE_URL = "http://127.0.0.1:9";
+process.env.LETTA_API_KEY = "local-dev-key";
+delete process.env.LETTA_CLI_PATH;
+
+const { createSession } = await import(pathToFileURL(sdkPath).href);
+const session = createSession(undefined, {
+  model: "letta/letta-free",
+  permissionMode: "bypassPermissions",
+  cwd: process.cwd(),
+  canUseTool: async () => ({ behavior: "allow" }),
+});
+
+try {
+  await session.send("hi");
+  console.log("UNEXPECTED_SUCCESS");
+} catch (error) {
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+} finally {
+  try { session.close(); } catch {}
+}
+  `.trim();
+
+  writeFileSync(scriptPath, script);
+
+  const result = spawnSync(appExecutable, [scriptPath, resourcesRoot], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+    },
+    cwd: lettaUiRoot,
+    timeout: 60000,
+  });
+
+  try {
+    const firstLine = result.stdout.split(/\r?\n/).find((line) => line.trim().startsWith("{"));
+    if (!firstLine) {
+      fail(`packaged SDK invariant probe produced no JSON header:\n${result.stdout}\n${result.stderr}`);
+    }
+
+    const parsed = JSON.parse(firstLine);
+    if (!parsed.unpackedCliExists) {
+      fail("packaged SDK invariant failed: unpacked Letta CLI is missing from bundle");
+    }
+    if (parsed.nestedSdkExists || parsed.nestedCliExists) {
+      fail("packaged SDK invariant failed: nested lettabot SDK/CLI copies leaked into bundle");
+    }
+    if (!result.stderr.includes(`CLI path: ${cliPath}`)) {
+      fail(`packaged SDK invariant failed: expected CLI path diagnostics to point at unpacked CLI\n${result.stderr}`);
+    }
+  } finally {
+    safeRemove(tmpDir);
+  }
 }
 
 function run(command, commandArgs, options = {}) {
@@ -358,6 +435,9 @@ if (!existsSync(pythonPath)) fail(`Missing bundled python runtime at ${pythonPat
 
 logSection("Running staged runtime verify");
 run(process.execPath, [path.join(scriptDir, "verify-letta-server.mjs")], { cwd: lettaUiRoot });
+
+logSection("Checking packaged SDK invariants");
+verifyPackagedSdkInvariants();
 
 logSection("Checking bundle layout");
 const pyvenv = readFileSync(pyvenvPath, "utf8");

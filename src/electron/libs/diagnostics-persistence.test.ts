@@ -3,8 +3,10 @@ import * as fs from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  getDiagnosticIncidentStoragePath,
   getDiagnosticsStoragePath,
   readPersistedDiagnosticSummaries,
+  readPersistedDiagnosticIncidentSamples,
   writePersistedDiagnosticSummaries,
   MAX_STORED_DIAGNOSTIC_TRACES,
 } from "./diagnostics-storage.js";
@@ -12,10 +14,12 @@ import {
   flushDiagnosticsPersistence,
   getDiagnosticSummary,
   initializeDiagnosticsPersistence,
+  listDiagnosticIncidentSamples,
   resetDiagnosticsForTests,
 } from "./diagnostics.js";
 import { emitStructuredLog, resetTraceObservers, resetTraceSink } from "./trace.js";
-import { IPC_START_001 } from "../../shared/decision-ids.js";
+import { IPC_START_001, RC_DESKTOP_RUN_004 } from "../../shared/decision-ids.js";
+import { E_RESIDENT_CORE_DESKTOP_RUN_FAILED } from "../../shared/error-codes.js";
 
 describe("diagnostics persistence", () => {
   let userDataPath: string;
@@ -113,5 +117,52 @@ describe("diagnostics persistence", () => {
     } finally {
       fs.chmodSync(storageDir, 0o755);
     }
+  });
+
+  it("persists failed traces into the incident archive and restores them on restart", () => {
+    emitStructuredLog({
+      level: "info",
+      component: "resident-core",
+      trace_id: "trc_incident",
+      turn_id: "turn_incident",
+      session_id: "conv_incident",
+      decision_id: IPC_START_001,
+      message: "entered session start",
+      ts: "2026-04-09T18:10:00.000Z",
+    });
+
+    emitStructuredLog({
+      level: "error",
+      component: "resident-core-session-owner",
+      trace_id: "trc_incident",
+      turn_id: "turn_incident",
+      session_id: "conv_incident",
+      decision_id: RC_DESKTOP_RUN_004,
+      error_code: E_RESIDENT_CORE_DESKTOP_RUN_FAILED,
+      message: "desktop run failed",
+      ts: "2026-04-09T18:10:01.000Z",
+    });
+
+    flushDiagnosticsPersistence();
+
+    const storagePath = getDiagnosticIncidentStoragePath(userDataPath);
+    expect(storagePath).toContain("diagnostics/incidents.json");
+    expect(readPersistedDiagnosticIncidentSamples(userDataPath)).toHaveLength(1);
+    expect(listDiagnosticIncidentSamples()[0]).toMatchObject({
+      traceId: "trc_incident",
+      occurrenceCount: 1,
+      errorCode: E_RESIDENT_CORE_DESKTOP_RUN_FAILED,
+      firstFailedDecisionId: RC_DESKTOP_RUN_004,
+    });
+
+    resetDiagnosticsForTests();
+    initializeDiagnosticsPersistence(userDataPath);
+
+    expect(listDiagnosticIncidentSamples()[0]).toMatchObject({
+      traceId: "trc_incident",
+      occurrenceCount: 1,
+      errorCode: E_RESIDENT_CORE_DESKTOP_RUN_FAILED,
+      firstFailedDecisionId: RC_DESKTOP_RUN_004,
+    });
   });
 });

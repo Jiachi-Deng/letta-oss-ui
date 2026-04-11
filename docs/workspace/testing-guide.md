@@ -74,9 +74,17 @@
 
 至少验：
 
-1. `verify-release.sh` 通过
+1. `release-pipeline.sh` 跑通，或至少 `verify-release.sh` 通过
 2. `Bundle Smoke` 通过
-3. DMG 或 ZIP 任选一条首装链通过
+3. packaged desktop renderer 回归组通过
+4. DMG 或 ZIP 任选一条首装链通过
+5. 如果是 packaged bug，先读：
+   - `/Users/jachi/Desktop/letta-workspace/docs/packaging-playbook.md`
+
+注意：
+
+- 不要把 `dist/mac-arm64/Letta.app` 的直接启动结果，当成最终发布结论
+- 真正要认的是 `/Applications/Letta.app` 这条链
 
 ## 4. 常用自动化测试命令
 
@@ -86,6 +94,7 @@
 cd /Users/jachi/Desktop/letta-workspace/app/letta-desktop
 bunx vitest run
 bunx tsc --project src/electron/tsconfig.json --noEmit
+bun run evals:desktop-renderer -- --case example-desktop-first-message-failure
 ```
 
 ### vendored lettabot

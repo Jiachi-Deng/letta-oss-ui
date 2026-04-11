@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BOOT_CONN_001,
   BOOT_CONN_002,
+  BOOT_CONN_004,
   CI_BOOT_004,
   IPC_START_001,
   LETTABOT_BACKGROUND_RUN_003,
@@ -21,6 +22,7 @@ import {
   E_LETTA_CLI_EXIT_NON_ZERO,
   E_LETTA_CLI_SPAWN_FAILED,
   E_PROVIDER_CONNECT_FAILED,
+  E_PROVIDER_MODEL_NOT_READY,
   E_SESSION_CONVERSATION_ID_MISSING,
   E_HISTORY_LOAD_FAILED,
   E_PERMISSION_RESPONSE_MISSING,
@@ -143,6 +145,26 @@ describe("diagnostics aggregation", () => {
       firstFailedDecisionId: CI_BOOT_004,
       suggestedAction:
         "Open the nested CodeIsland.app once and approve it in System Settings > Privacy & Security, then relaunch Letta.",
+    });
+  });
+
+  it("suggests provider model readiness troubleshooting when bootstrap completes registration before models are synced", () => {
+    emitStructuredLog({
+      level: "error",
+      component: "provider-bootstrap",
+      trace_id: "trc_model_ready_wait",
+      turn_id: "turn_model_ready_wait",
+      session_id: "conv_model_ready_wait",
+      decision_id: BOOT_CONN_004,
+      error_code: E_PROVIDER_MODEL_NOT_READY,
+      message: "compatible provider model readiness check failed",
+    });
+
+    expect(getDiagnosticSummary("trc_model_ready_wait")).toMatchObject({
+      errorCode: E_PROVIDER_MODEL_NOT_READY,
+      firstFailedDecisionId: BOOT_CONN_004,
+      suggestedAction:
+        "Inspect the compatible provider bootstrap readiness path and confirm the expected model handle is visible from the local Letta server before the first desktop run.",
     });
   });
 

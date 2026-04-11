@@ -5,10 +5,24 @@
         "dist-electron",
         "dist-react"
     ],
+    "extraFiles": [
+        {
+            "from": "node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.17.3.dylib",
+            "to": "Frameworks/libvips-cpp.8.17.3.dylib"
+        }
+    ],
     "extraResources": [
         {
             "from": "dist-electron/electron/preload.cjs",
             "to": "dist-electron/electron/preload.cjs"
+        },
+        {
+            "from": "node_modules/@img/sharp-darwin-arm64",
+            "to": "app.asar.unpacked/node_modules/@img/sharp-darwin-arm64"
+        },
+        {
+            "from": "node_modules/@img/sharp-libvips-darwin-arm64",
+            "to": "app.asar.unpacked/node_modules/@img/sharp-libvips-darwin-arm64"
         },
         {
             "from": "templateIcon.png",

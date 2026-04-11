@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BOOT_CONN_001,
   BOOT_CONN_002,
+  BOOT_CONN_003,
+  BOOT_CONN_004,
   CLI_CONNECT_001,
   CLI_CONNECT_002,
   CLI_CONNECT_003,
@@ -14,11 +16,13 @@ import {
   E_LETTA_CLI_EXIT_NON_ZERO,
   E_LETTA_CLI_SPAWN_FAILED,
   E_PROVIDER_CONNECT_FAILED,
+  E_PROVIDER_MODEL_NOT_READY,
 } from "../../shared/error-codes.js";
 
 const existsSyncMock = vi.hoisted(() => vi.fn<(path: string) => boolean>());
 const spawnMock = vi.hoisted(() => vi.fn());
 const electronAppState = vi.hoisted(() => ({ isPackaged: false }));
+const fetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("node:fs", () => ({
   existsSync: existsSyncMock,
@@ -79,6 +83,8 @@ describe("provider bootstrap", () => {
     vi.clearAllMocks();
     process.env = { ...originalEnv };
     electronAppState.isPackaged = false;
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
     Object.defineProperty(process, "resourcesPath", {
       value: "/Applications/Letta.app/Contents/Resources",
       configurable: true,
@@ -87,6 +93,7 @@ describe("provider bootstrap", () => {
 
   afterEach(() => {
     process.env = { ...originalEnv };
+    vi.unstubAllGlobals();
     Object.defineProperty(process, "resourcesPath", {
       value: originalResourcesPath,
       configurable: true,
@@ -116,6 +123,12 @@ describe("provider bootstrap", () => {
         stderrChunks: ["provider warning"],
       }),
     );
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{ handle: "lc-minimax/MiniMax-M1" }],
+      }),
+    });
 
     const events: Array<Record<string, unknown>> = [];
     const trace = await import("./trace.ts");
@@ -355,6 +368,61 @@ describe("provider bootstrap", () => {
             component: "letta-code-cli",
             decision_id: CLI_CONNECT_006,
             error_code: E_LETTA_CLI_SPAWN_FAILED,
+          }),
+        ]),
+      );
+    } finally {
+      trace.resetTraceSink();
+    }
+  });
+
+  it("fails bootstrap when the target model handle never becomes ready on the local server", async () => {
+    process.env.LETTA_CLI_PATH = "/tmp/letta.js";
+    process.env.LETTA_LOCAL_SERVER_URL = "http://127.0.0.1:8283/";
+    existsSyncMock.mockImplementation((candidate) => candidate === "/tmp/letta.js");
+    spawnMock.mockImplementation(() =>
+      createChildProcess({
+        exitCode: 0,
+      }),
+    );
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [{ handle: "lc-minimax/MiniMax-M2.1" }],
+      }),
+    });
+
+    const events: Array<Record<string, unknown>> = [];
+    const trace = await import("./trace.ts");
+    trace.setTraceSink((event) => {
+      events.push(event as unknown as Record<string, unknown>);
+    });
+
+    try {
+      const { prepareRuntimeConnection } = await import("./provider-bootstrap.ts");
+
+      await expect(
+        prepareRuntimeConnection(
+          {
+            connectionType: "anthropic-compatible",
+            LETTA_BASE_URL: "https://api.minimax.chat/v1/",
+            LETTA_API_KEY: "sk-minimax",
+            model: "MiniMax-M2.7",
+          },
+          { traceId: "trc_model_not_ready", turnId: "turn_model_not_ready", sessionId: "conv_model_not_ready" },
+        ),
+      ).rejects.toThrow(/did not become ready/i);
+
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            component: "provider-bootstrap",
+            decision_id: BOOT_CONN_003,
+          }),
+          expect.objectContaining({
+            component: "provider-bootstrap",
+            decision_id: BOOT_CONN_004,
+            error_code: E_PROVIDER_MODEL_NOT_READY,
           }),
         ]),
       );

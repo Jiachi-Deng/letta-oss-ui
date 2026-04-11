@@ -28,3 +28,11 @@ export type DiagnosticSummary = {
 };
 
 export type DiagnosticSummaryListItem = Omit<DiagnosticSummary, "steps">;
+
+export type DiagnosticIncidentSample = DiagnosticSummary & {
+  fingerprint: string;
+  capturedAt: string;
+  lastSeenAt: string;
+  occurrenceCount: number;
+  recentTraceIds: string[];
+};

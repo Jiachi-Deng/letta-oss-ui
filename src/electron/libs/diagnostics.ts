@@ -1,4 +1,5 @@
 import type {
+  DiagnosticIncidentSample,
   DiagnosticStatus,
   DiagnosticStep,
   DiagnosticSummary,
@@ -14,6 +15,7 @@ import {
   E_LETTA_CLI_SPAWN_FAILED,
   E_PERMISSION_RESPONSE_MISSING,
   E_PROVIDER_CONNECT_FAILED,
+  E_PROVIDER_MODEL_NOT_READY,
   E_SESSION_CONVERSATION_ID_MISSING,
   E_SESSION_STOP_FAILED,
   E_SERVER_EXITED_EARLY,
@@ -35,8 +37,11 @@ import {
 } from "../../shared/error-codes.js";
 import type { StructuredLogEvent } from "./trace.js";
 import {
+  MAX_STORED_DIAGNOSTIC_INCIDENTS,
   MAX_STORED_DIAGNOSTIC_TRACES,
+  readPersistedDiagnosticIncidentSamples,
   readPersistedDiagnosticSummaries,
+  writePersistedDiagnosticIncidentSamples,
   writePersistedDiagnosticSummaries,
 } from "./diagnostics-storage.js";
 
@@ -57,6 +62,7 @@ type DiagnosticsPersistenceState = {
 
 const traces = new Map<string, TraceRecord>();
 const latestTraceBySessionId = new Map<string, string>();
+const incidents = new Map<string, DiagnosticIncidentSample>();
 let persistenceState: DiagnosticsPersistenceState | null = null;
 
 function nowIso(): string {
@@ -150,6 +156,8 @@ function getSuggestedAction(errorCode?: ErrorCode): string | undefined {
       return "Inspect the CodeIsland monitor restart path and the preceding launch command result.";
     case E_PROVIDER_CONNECT_FAILED:
       return "Inspect the provider base URL, API key, and letta connect CLI stderr for the failed registration step.";
+    case E_PROVIDER_MODEL_NOT_READY:
+      return "Inspect the compatible provider bootstrap readiness path and confirm the expected model handle is visible from the local Letta server before the first desktop run.";
     case E_LETTA_CLI_SPAWN_FAILED:
       return "Inspect the resolved letta-code CLI path, Node runtime, and spawn environment for the failing registration step.";
     case E_LETTA_CLI_EXIT_NON_ZERO:
@@ -195,6 +203,15 @@ function getSuggestedAction(errorCode?: ErrorCode): string | undefined {
     default:
       return undefined;
   }
+}
+
+function buildIncidentFingerprint(summary: DiagnosticSummary): string {
+  return [
+    summary.errorCode ?? "no-error-code",
+    summary.firstFailedDecisionId ?? "no-first-failed-decision",
+    summary.lastSuccessfulDecisionId ?? "no-last-successful-decision",
+    summary.steps.find((step) => step.status === "error")?.component ?? "no-error-component",
+  ].join("::");
 }
 
 function buildSummary(record: TraceRecord): DiagnosticSummary {
@@ -253,6 +270,69 @@ function toTraceRecord(summary: DiagnosticSummary): TraceRecord {
   };
 }
 
+function upsertIncident(summary: DiagnosticSummary): void {
+  if (!summary.firstFailedDecisionId && !summary.errorCode) {
+    return;
+  }
+
+  const fingerprint = buildIncidentFingerprint(summary);
+  const existing = incidents.get(fingerprint);
+  if (existing) {
+    const traceIds = [summary.traceId, ...existing.recentTraceIds.filter((traceId) => traceId !== summary.traceId)].slice(0, 10);
+    incidents.set(fingerprint, {
+      ...existing,
+      summary: summary.summary,
+      errorCode: summary.errorCode,
+      lastSuccessfulDecisionId: summary.lastSuccessfulDecisionId,
+      firstFailedDecisionId: summary.firstFailedDecisionId,
+      suggestedAction: summary.suggestedAction,
+      updatedAt: summary.updatedAt,
+      stepCount: summary.stepCount,
+      steps: summary.steps.map(cloneStep),
+      lastSeenAt: summary.updatedAt ?? nowIso(),
+      occurrenceCount: existing.occurrenceCount + 1,
+      recentTraceIds: traceIds,
+    });
+    trimIncidentRecords();
+    return;
+  }
+
+  const capturedAt = summary.updatedAt ?? nowIso();
+  incidents.set(fingerprint, {
+    ...summary,
+    steps: summary.steps.map(cloneStep),
+    fingerprint,
+    capturedAt,
+    lastSeenAt: capturedAt,
+    occurrenceCount: 1,
+    recentTraceIds: [summary.traceId],
+  });
+  trimIncidentRecords();
+}
+
+function trimIncidentRecords(): void {
+  if (incidents.size <= MAX_STORED_DIAGNOSTIC_INCIDENTS) {
+    return;
+  }
+
+  const keepFingerprints = new Set(
+    [...incidents.values()]
+      .sort((left, right) => {
+        const lastSeenComparison = right.lastSeenAt.localeCompare(left.lastSeenAt);
+        if (lastSeenComparison !== 0) return lastSeenComparison;
+        return right.capturedAt.localeCompare(left.capturedAt);
+      })
+      .slice(0, MAX_STORED_DIAGNOSTIC_INCIDENTS)
+      .map((incident) => incident.fingerprint),
+  );
+
+  for (const fingerprint of incidents.keys()) {
+    if (!keepFingerprints.has(fingerprint)) {
+      incidents.delete(fingerprint);
+    }
+  }
+}
+
 function trimTraceRecords(): void {
   if (traces.size <= MAX_STORED_DIAGNOSTIC_TRACES) {
     return;
@@ -298,6 +378,10 @@ function persistDiagnosticsSnapshot(): void {
 
   const summaries = getPersistableDiagnosticSummaries();
   writePersistedDiagnosticSummaries(persistenceState.userDataPath, summaries);
+  writePersistedDiagnosticIncidentSamples(
+    persistenceState.userDataPath,
+    getPersistedDiagnosticIncidentSamples(),
+  );
 }
 
 function getPersistableDiagnosticSummaries(): DiagnosticSummary[] {
@@ -308,6 +392,14 @@ function getPersistableDiagnosticSummaries(): DiagnosticSummary[] {
       return right.createdAt.localeCompare(left.createdAt);
     })
     .map((record) => buildSummary(record));
+}
+
+function getPersistedDiagnosticIncidentSamples(): DiagnosticIncidentSample[] {
+  return [...incidents.values()].sort((left, right) => {
+    const lastSeenComparison = right.lastSeenAt.localeCompare(left.lastSeenAt);
+    if (lastSeenComparison !== 0) return lastSeenComparison;
+    return right.capturedAt.localeCompare(left.capturedAt);
+  });
 }
 
 function scheduleDiagnosticsPersistence(): void {
@@ -346,8 +438,17 @@ export function initializeDiagnosticsPersistence(userDataPath: string): void {
   for (const summary of persistedSummaries) {
     traces.set(summary.traceId, toTraceRecord(summary));
   }
+  incidents.clear();
+  for (const incident of readPersistedDiagnosticIncidentSamples(userDataPath)) {
+    incidents.set(incident.fingerprint, {
+      ...incident,
+      recentTraceIds: incident.recentTraceIds.slice(),
+      steps: incident.steps.map(cloneStep),
+    });
+  }
 
   trimTraceRecords();
+  trimIncidentRecords();
   rebuildLatestTraceBySessionId();
 }
 
@@ -366,6 +467,11 @@ export function recordDiagnosticEvent(event: StructuredLogEvent): void {
   record.updatedAt = event.ts;
   if (event.error_code) {
     record.errorCodes.push(event.error_code);
+  }
+
+  const summary = buildSummary(record);
+  if (summary.firstFailedDecisionId || summary.errorCode) {
+    upsertIncident(summary);
   }
 
   trimTraceRecords();
@@ -395,6 +501,10 @@ export function listDiagnosticSteps(traceId: string): DiagnosticStep[] {
   return getDiagnosticSummary(traceId)?.steps ?? [];
 }
 
+export function listDiagnosticIncidentSamples(): DiagnosticIncidentSample[] {
+  return getPersistedDiagnosticIncidentSamples();
+}
+
 export function flushDiagnosticsPersistence(): void {
   if (!persistenceState) return;
   if (persistenceState.flushTimer) {
@@ -411,5 +521,6 @@ export function resetDiagnosticsForTests(): void {
 
   traces.clear();
   latestTraceBySessionId.clear();
+  incidents.clear();
   persistenceState = null;
 }

@@ -12,10 +12,13 @@ import {
   E_LETTA_CLI_EXIT_NON_ZERO,
   E_LETTA_CLI_SPAWN_FAILED,
   E_PROVIDER_CONNECT_FAILED,
+  E_PROVIDER_MODEL_NOT_READY,
 } from "../../shared/error-codes.js";
 import {
   BOOT_CONN_001,
   BOOT_CONN_002,
+  BOOT_CONN_003,
+  BOOT_CONN_004,
   CLI_CONNECT_001,
   CLI_CONNECT_002,
   CLI_CONNECT_003,
@@ -68,6 +71,8 @@ const compatibleProviderCache = new Map<string, Promise<CompatibleProviderConfig
 const providerLog = createComponentLogger("provider-bootstrap");
 const cliLog = createComponentLogger("letta-code-cli");
 const CLI_OUTPUT_PREVIEW_LIMIT = 200;
+const MODEL_READY_MAX_ATTEMPTS = 12;
+const MODEL_READY_DELAY_MS = 250;
 
 function normalizeString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -96,6 +101,105 @@ function normalizeModelName(model: string): string {
 
   const slashIndex = trimmed.indexOf("/");
   return slashIndex >= 0 ? trimmed.slice(slashIndex + 1) : trimmed;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractModelHandles(payload: unknown): string[] {
+  if (Array.isArray(payload)) {
+    return payload
+      .map((item) =>
+        item && typeof item === "object" && "handle" in item && typeof item.handle === "string"
+          ? item.handle
+          : null,
+      )
+      .filter((value): value is string => Boolean(value));
+  }
+
+  if (payload && typeof payload === "object" && "data" in payload) {
+    return extractModelHandles((payload as { data?: unknown }).data);
+  }
+
+  return [];
+}
+
+async function waitForModelHandleReady(
+  serverBaseUrl: string,
+  apiKey: string,
+  modelHandle: string,
+  trace?: TraceContext,
+): Promise<void> {
+  providerLog({
+    level: "info",
+    message: "compatible provider model readiness check started",
+    decision_id: BOOT_CONN_003,
+    trace_id: trace?.traceId,
+    turn_id: trace?.turnId,
+    session_id: trace?.sessionId,
+    data: {
+      serverBaseUrl,
+      modelHandle,
+      maxAttempts: MODEL_READY_MAX_ATTEMPTS,
+      delayMs: MODEL_READY_DELAY_MS,
+    },
+  });
+
+  let lastObservedHandles: string[] = [];
+
+  for (let attempt = 1; attempt <= MODEL_READY_MAX_ATTEMPTS; attempt += 1) {
+    const response = await fetch(`${serverBaseUrl}/v1/models`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Model readiness check failed with status ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const handles = extractModelHandles(payload);
+    lastObservedHandles = handles.slice(0, 20);
+
+    if (handles.includes(modelHandle)) {
+      providerLog({
+        level: "info",
+        message: "compatible provider model readiness check succeeded",
+        decision_id: BOOT_CONN_004,
+        trace_id: trace?.traceId,
+        turn_id: trace?.turnId,
+        session_id: trace?.sessionId,
+        data: {
+          serverBaseUrl,
+          modelHandle,
+          attempt,
+        },
+      });
+      return;
+    }
+
+    if (attempt < MODEL_READY_MAX_ATTEMPTS) {
+      await sleep(MODEL_READY_DELAY_MS);
+    }
+  }
+
+  providerLog({
+    level: "error",
+    message: "compatible provider model readiness check failed",
+    decision_id: BOOT_CONN_004,
+    error_code: E_PROVIDER_MODEL_NOT_READY,
+    trace_id: trace?.traceId,
+    turn_id: trace?.turnId,
+    session_id: trace?.sessionId,
+    data: {
+      serverBaseUrl,
+      modelHandle,
+      maxAttempts: MODEL_READY_MAX_ATTEMPTS,
+      observedHandles: lastObservedHandles,
+    },
+  });
+  throw new Error(`Model handle ${modelHandle} did not become ready on ${serverBaseUrl}`);
 }
 
 function getCompatibleProviderSpec(
@@ -413,7 +517,15 @@ export async function ensureCompatibleProvider(
       LETTA_API_KEY: getCompatibleServerApiKey(),
     },
     trace,
-  ).then(() => compatibleProvider);
+  ).then(async () => {
+    await waitForModelHandleReady(
+      compatibleProvider.serverBaseUrl,
+      getCompatibleServerApiKey(),
+      compatibleProvider.modelHandle,
+      trace,
+    );
+    return compatibleProvider;
+  });
 
   compatibleProviderCache.set(cacheKey, registrationPromise);
 
