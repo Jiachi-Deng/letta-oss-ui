@@ -3,15 +3,23 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+import { loadReleaseConfig } from "./lib/release-config.js";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const lettaUiRoot = path.resolve(scriptDir, "..");
+const workspaceRoot = path.resolve(lettaUiRoot, "../..");
 
 const args = process.argv.slice(2);
+function readArg(flag) {
+  const index = args.findIndex((arg) => arg === flag);
+  if (index < 0) return null;
+  return args[index + 1] ?? null;
+}
 const appArgIndex = args.findIndex((arg) => arg === "--app");
 const appPath = appArgIndex >= 0
   ? path.resolve(args[appArgIndex + 1] ?? "")
   : path.join(lettaUiRoot, "dist", "mac-arm64", "Letta.app");
+const configArgPath = readArg("--config");
 
 const resourcesRoot = path.join(appPath, "Contents", "Resources");
 const serverRoot = path.join(resourcesRoot, "LettaServer");
@@ -22,38 +30,10 @@ const pythonHome = path.join(serverRoot, "python-base", "Python.framework", "Ver
 const pythonPath = path.join(serverRoot, "venv", "bin", "python3");
 const nltkDataPath = path.join(serverRoot, "nltk_data");
 const pyvenvPath = path.join(serverRoot, "venv", "pyvenv.cfg");
-const defaultConfigPath = path.join(
-  os.homedir(),
-  "Library",
-  "Application Support",
-  "Letta",
-  "config.json",
-);
-
 function normalizeModelName(model) {
   const trimmed = model.trim();
   const slashIndex = trimmed.indexOf("/");
   return slashIndex >= 0 ? trimmed.slice(slashIndex + 1) : trimmed;
-}
-
-function loadReleaseConfig() {
-  const configPath = process.env.LETTA_RELEASE_CONFIG_PATH || defaultConfigPath;
-  if (!existsSync(configPath)) {
-    fail(`Missing release config at ${configPath}`);
-  }
-  const parsed = JSON.parse(readFileSync(configPath, "utf8"));
-  const connectionType = parsed.connectionType || "letta-server";
-  const baseUrl = parsed.LETTA_BASE_URL;
-  const apiKey = parsed.LETTA_API_KEY;
-  const model = parsed.model;
-
-  if (connectionType !== "letta-server") {
-    if (!baseUrl || !apiKey || !model) {
-      fail(`Release config at ${configPath} is missing compatible mode fields`);
-    }
-  }
-
-  return { configPath, connectionType, baseUrl, apiKey, model };
 }
 
 function getCompatibleProviderSpec(connectionType, model) {
@@ -230,7 +210,11 @@ function ensureNoMutableData(rootPath) {
 }
 
 async function runBundleHealthSmoke() {
-  const releaseConfig = loadReleaseConfig();
+  const releaseConfig = loadReleaseConfig({
+    workspaceRoot,
+    cliArgPath: configArgPath,
+  });
+  console.log(`[release-check] Using release config from ${releaseConfig.sourceLabel}: ${releaseConfig.configPath}`);
   const tmpHome = mkdtempSync(path.join(os.tmpdir(), "letta-release-home."));
   const tmpLetta = mkdtempSync(path.join(os.tmpdir(), "letta-release-letta."));
   const tmpCwd = mkdtempSync(path.join(os.tmpdir(), "letta-release-cwd."));

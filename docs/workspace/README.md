@@ -87,6 +87,11 @@
 
 - `/Users/jachi/Desktop/letta-workspace/docs/packaging-playbook.md`
 
+真实 release/eval 凭据优先放：
+
+- `/Users/jachi/Desktop/letta-workspace/release-config.local.json`
+- 或 `LETTA_RELEASE_CONFIG_PATH=/absolute/path/to/release-config.json`
+
 常用命令：
 
 ```bash

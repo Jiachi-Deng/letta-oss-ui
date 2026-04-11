@@ -85,6 +85,9 @@
 
 - 不要把 `dist/mac-arm64/Letta.app` 的直接启动结果，当成最终发布结论
 - 真正要认的是 `/Applications/Letta.app` 这条链
+- packaged/release runner 的真实凭据优先走：
+  - `/Users/jachi/Desktop/letta-workspace/release-config.local.json`
+  - 或 `LETTA_RELEASE_CONFIG_PATH`
 
 ## 4. 常用自动化测试命令
 

@@ -62,7 +62,7 @@ export function buildIsolatedAppConfig({ evalCase, sourceConfig }) {
     LETTA_BASE_URL: runtimeConfig.baseUrl,
     LETTA_API_KEY: runtimeConfig.apiKey,
     model: runtimeConfig.model,
-    residentCore: {},
+    residentCore: sourceConfig.residentCore ?? {},
   };
 }
 

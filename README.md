@@ -88,6 +88,15 @@ cd /Users/jachi/Desktop/letta-workspace
 
 - `/Users/jachi/Desktop/letta-workspace/docs/packaging-playbook.md`
 
+真实 release/eval 凭据优先放：
+
+- `/Users/jachi/Desktop/letta-workspace/release-config.local.json`
+- 或 `LETTA_RELEASE_CONFIG_PATH=/absolute/path/to/release-config.json`
+
+仓库模板：
+
+- `/Users/jachi/Desktop/letta-workspace/release-config.example.json`
+
 如果你已经在 app repo 里，手工补跑：
 
 ```bash
