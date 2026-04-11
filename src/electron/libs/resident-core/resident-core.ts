@@ -10,6 +10,7 @@ import type { PendingPermission } from "../runtime-state.js";
 import { createResidentCoreRunnerRegistry } from "./runner-registry.js";
 import { createResidentCoreSessionStore } from "./session-store.js";
 import type { ResidentCoreSessionOwner } from "./session-owner.js";
+import type { ResidentCoreAgentEntry, ResidentCoreAgentRecord } from "./state-store.js";
 import {
   IPC_CONTINUE_001,
   IPC_START_001,
@@ -81,6 +82,20 @@ function remapEventSessionId(event: ServerEvent, sessionId: string): ServerEvent
   } as ServerEvent;
 }
 
+function toAgentActivePayload(
+  sessionOwner: ResidentCoreSessionOwner,
+  success: boolean,
+  error?: string,
+): { activeAgentKey: string; agent: ResidentCoreAgentRecord | null; agents: ResidentCoreAgentEntry[]; success: boolean; error?: string } {
+  return {
+    success,
+    activeAgentKey: sessionOwner.getActiveAgentKey(),
+    agent: sessionOwner.getActiveAgentRecord(),
+    agents: sessionOwner.listKnownAgents(),
+    ...(error ? { error } : {}),
+  };
+}
+
 export class ResidentCoreService {
   private readonly runnerRegistry = createResidentCoreRunnerRegistry();
   private readonly sessionStore = createResidentCoreSessionStore();
@@ -127,6 +142,68 @@ export class ResidentCoreService {
 
   private async handleSessionList(): Promise<void> {
     this.emit({ type: "session.list", payload: { sessions: this.sessionStore.list() } });
+  }
+
+  private async handleAgentActiveGet(): Promise<void> {
+    this.emit({
+      type: "agent.active",
+      payload: {
+        activeAgentKey: this.sessionOwner.getActiveAgentKey(),
+        agent: this.sessionOwner.getActiveAgentRecord(),
+        agents: this.sessionOwner.listKnownAgents(),
+      },
+    });
+  }
+
+  private async handleAgentList(): Promise<void> {
+    this.emit({
+      type: "agent.list",
+      payload: {
+        activeAgentKey: this.sessionOwner.getActiveAgentKey(),
+        agents: this.sessionOwner.listKnownAgents(),
+      },
+    });
+  }
+
+  private async handleAgentSwitch(agentKey: string): Promise<void> {
+    const switched = this.sessionOwner.switchActiveAgent(agentKey);
+    this.emit({
+      type: "agent.switch.result",
+      payload: toAgentActivePayload(
+        this.sessionOwner,
+        switched,
+        switched ? undefined : `Unknown agent key: ${agentKey}`,
+      ),
+    });
+  }
+
+  private async handleAgentCreate(payload: Extract<ClientEvent, { type: "agent.create" }>["payload"]): Promise<void> {
+    const result = await this.sessionOwner.createManagedAgent({ name: payload.name });
+    this.emit({
+      type: "agent.create.result",
+      payload: result,
+    });
+  }
+
+  private async handleAgentRename(payload: Extract<ClientEvent, { type: "agent.rename" }>["payload"]): Promise<void> {
+    const result = await this.sessionOwner.renameManagedAgent({
+      agentKey: payload.agentKey,
+      name: payload.name,
+    });
+    this.emit({
+      type: "agent.rename.result",
+      payload: result,
+    });
+  }
+
+  private async handleAgentDelete(payload: Extract<ClientEvent, { type: "agent.delete" }>["payload"]): Promise<void> {
+    const result = await this.sessionOwner.deleteManagedAgent({
+      agentKey: payload.agentKey,
+    });
+    this.emit({
+      type: "agent.delete.result",
+      payload: result,
+    });
   }
 
   private async handleSessionHistory(conversationId: string): Promise<void> {
@@ -662,6 +739,24 @@ export class ResidentCoreService {
       case "session.history":
         await this.handleSessionHistory(event.payload.sessionId);
         return;
+      case "agent.active.get":
+        await this.handleAgentActiveGet();
+        return;
+      case "agent.list":
+        await this.handleAgentList();
+        return;
+      case "agent.switch":
+        await this.handleAgentSwitch(event.payload.agentKey);
+        return;
+      case "agent.create":
+        await this.handleAgentCreate(event.payload);
+        return;
+      case "agent.rename":
+        await this.handleAgentRename(event.payload);
+        return;
+      case "agent.delete":
+        await this.handleAgentDelete(event.payload);
+        return;
       case "session.start":
         await this.handleSessionStart(event.payload);
         return;
@@ -680,7 +775,7 @@ export class ResidentCoreService {
     }
   }
 
-  cleanupAllSessions(): void {
+  async cleanupAllSessions(): Promise<void> {
     try {
       for (const [conversationId, handle] of this.runnerRegistry.entries()) {
         finishCodeIslandObservation(conversationId, { reason: "user", success: false });
@@ -694,7 +789,8 @@ export class ResidentCoreService {
       }
     } finally {
       this.runnerRegistry.clear();
-      this.sessionStore.clear();
+      this.sessionStore.sanitizeForRestart();
+      await this.sessionStore.flushPersistence();
       this.sessionOwner.invalidateDesktopSession();
       discardAllReusableConversationSessions();
     }

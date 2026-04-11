@@ -77,6 +77,16 @@ type ResidentCoreTelegramStartupConfig = {
     workingDir?: string;
 }
 
+type ResidentCoreChannelName = "telegram";
+
+type ResidentCoreChannelsConfig = Partial<
+    Record<ResidentCoreChannelName, ResidentCoreTelegramStartupConfig | null>
+>;
+
+type ResidentCoreConfig = {
+    channels?: ResidentCoreChannelsConfig;
+}
+
 type AppConfigState = {
     mode: "development" | "packaged";
     source:
@@ -92,9 +102,7 @@ type AppConfigState = {
         LETTA_BASE_URL: string;
         LETTA_API_KEY?: string;
         model?: string;
-        residentCore?: {
-            telegram?: ResidentCoreTelegramStartupConfig | null;
-        };
+        residentCore?: ResidentCoreConfig;
     };
     canEdit: boolean;
     requiresOnboarding: boolean;
@@ -132,9 +140,7 @@ interface Window {
             LETTA_BASE_URL?: string;
             LETTA_API_KEY?: string;
             model?: string;
-            residentCore?: {
-                telegram?: ResidentCoreTelegramStartupConfig | null;
-            };
+            residentCore?: ResidentCoreConfig;
         }) => Promise<AppConfigState>;
         selectDirectory: () => Promise<string | null>;
     }

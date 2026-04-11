@@ -23,8 +23,8 @@ export async function handleClientEvent(event: ClientEvent): Promise<void> {
 	await residentCore.handleClientEvent(event);
 }
 
-export function cleanupAllSessions(): void {
-	residentCore?.cleanupAllSessions();
+export async function cleanupAllSessions(): Promise<void> {
+	await residentCore?.cleanupAllSessions();
 }
 
 export const residentCoreBroadcast = broadcast;

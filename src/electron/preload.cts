@@ -1,5 +1,5 @@
 import electron from "electron";
-import type { ResidentCoreTelegramStartupConfig } from "./libs/config.js";
+import type { ResidentCoreChannelsConfig } from "./libs/config.js";
 import type { ClientEvent, ServerEvent } from "./types.js";
 
 electron.contextBridge.exposeInMainWorld("electron", {
@@ -42,7 +42,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
         LETTA_API_KEY?: string;
         model?: string;
         residentCore?: {
-            telegram?: ResidentCoreTelegramStartupConfig | null;
+            channels?: ResidentCoreChannelsConfig | null;
         };
     }) =>
         ipcInvoke("save-app-config", config),

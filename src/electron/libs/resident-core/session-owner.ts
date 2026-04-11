@@ -1,18 +1,22 @@
 import {
 	createSession,
+	createAgent,
 	resumeSession,
 	type CanUseToolCallback,
 	type SendMessage,
 	type Session as LettaSession,
 	type SDKMessage,
 } from "@letta-ai/letta-code-sdk";
+import Letta from "@letta-ai/letta-client";
 import type { Session as BotSession } from "@letta-ai/letta-code-sdk";
 import type { BotConfig, StreamMsg } from "lettabot/core/types.js";
 import type { PendingPermission } from "../runtime-state.js";
 import { createComponentLogger, createTraceContext, createTurnId, type TraceContext } from "../trace.js";
 import { createResidentCoreRuntimeHost } from "./runtime-host.js";
-import type { ResidentCoreRuntimeHost } from "./runtime-host.js";
+import type { ResidentCoreRuntimeHost, RuntimeConnectionInfo } from "./runtime-host.js";
 import { createResidentCoreSafetyCanUseTool } from "./safety.js";
+import { createResidentCoreStateStore, type ResidentCoreStateStore } from "./state-store.js";
+import type { ResidentCoreAgentEntry, ResidentCoreAgentMutationResult, ResidentCoreAgentRecord } from "../../types.js";
 import {
 	RC_DESKTOP_RUN_001,
 	RC_DESKTOP_RUN_002,
@@ -59,6 +63,27 @@ type NamespaceState<TSession> = {
 type SharedIdentityState = {
 	agentId: string | null;
 };
+
+function createResidentCoreClient(connection: RuntimeConnectionInfo): Letta {
+	return new Letta({
+		apiKey: connection.apiKey ?? "",
+		baseURL: connection.baseUrl,
+		defaultHeaders: {
+			"X-Letta-Source": "letta-desktop-resident-core",
+		},
+	});
+}
+
+function isAgentMissingError(error: unknown): boolean {
+	const status = typeof error === "object" && error !== null && "status" in error
+		? (error as { status?: unknown }).status
+		: undefined;
+	if (status === 404) return true;
+
+	const message = error instanceof Error ? error.message : String(error);
+	const lower = message.toLowerCase();
+	return lower.includes("not found") || lower.includes("404");
+}
 
 export type ResidentCoreDesktopRunOptions = {
 	prompt: string;
@@ -195,12 +220,14 @@ function sleep(ms: number): Promise<void> {
 
 export class ResidentCoreSessionOwner {
 	private readonly runtimeHost: ResidentCoreRuntimeHost;
+	private readonly stateStore: ResidentCoreStateStore;
 	private readonly desktopState: NamespaceState<LettaSession>;
 	private readonly botState: NamespaceState<BotSession>;
 	private readonly sharedIdentity: SharedIdentityState;
 
 	constructor(options: { runtimeHost?: ResidentCoreRuntimeHost } = {}) {
 		this.runtimeHost = options.runtimeHost ?? createResidentCoreRuntimeHost();
+		this.stateStore = createResidentCoreStateStore();
 		this.desktopState = {
 			sessions: new Map(),
 			currentCanUseToolByKey: new Map(),
@@ -210,17 +237,30 @@ export class ResidentCoreSessionOwner {
 			currentCanUseToolByKey: new Map(),
 		};
 		this.sharedIdentity = {
-			agentId: null,
+			agentId: this.stateStore.getActiveAgentId(),
 		};
 	}
 
 	private getSharedAgentId(localAgentId?: string): string | undefined {
-		return localAgentId || this.sharedIdentity.agentId || undefined;
+		return localAgentId || this.sharedIdentity.agentId || this.stateStore.getActiveAgentId() || undefined;
 	}
 
 	private rememberSharedAgentId(agentId?: string): void {
 		if (!agentId) return;
-		if (!this.sharedIdentity.agentId) {
+		if (!this.stateStore.rememberActiveAgent(agentId)) {
+			if (this.stateStore.getActiveAgentId() && this.stateStore.getActiveAgentId() !== agentId) {
+				log({
+					level: "warn",
+					message: "shared agent identity already established with a different agentId",
+					data: {
+						existingAgentId: this.stateStore.getActiveAgentId(),
+						incomingAgentId: agentId,
+					},
+				});
+			}
+			return;
+		}
+		if (!this.sharedIdentity.agentId || this.sharedIdentity.agentId === agentId) {
 			this.sharedIdentity.agentId = agentId;
 			return;
 		}
@@ -233,6 +273,220 @@ export class ResidentCoreSessionOwner {
 					incomingAgentId: agentId,
 				},
 			});
+		}
+	}
+
+	private clearSessionCaches(): void {
+		this.invalidateDesktopSession();
+		this.invalidateBotSession();
+	}
+
+	private buildAgentMutationResult(
+		agentKey: string,
+		success: boolean,
+		error?: string,
+	): ResidentCoreAgentMutationResult {
+		return {
+			success,
+			agentKey,
+			activeAgentKey: this.getActiveAgentKey(),
+			agent: this.getActiveAgentRecord(),
+			agents: this.listKnownAgents(),
+			...(error ? { error } : {}),
+		};
+	}
+
+	getActiveAgentKey(): string {
+		return this.stateStore.getActiveAgentKey();
+	}
+
+	getActiveAgentRecord(): ResidentCoreAgentRecord | null {
+		return this.stateStore.getActiveAgentRecord();
+	}
+
+	listKnownAgents(): ResidentCoreAgentEntry[] {
+		return this.stateStore.listAgents();
+	}
+
+	switchActiveAgent(agentKey: string): boolean {
+		const switched = this.stateStore.setActiveAgentKey(agentKey);
+		if (!switched) return false;
+
+		this.sharedIdentity.agentId = this.stateStore.getActiveAgentId();
+		this.clearSessionCaches();
+		return true;
+	}
+
+	private async prepareAgentAdminContext(trace?: TraceContext): Promise<{
+		connection: RuntimeConnectionInfo;
+		client: Letta;
+	}> {
+		const appConfigState = this.runtimeHost.getAppConfigState();
+		const context = trace ?? createSessionLoggerContext();
+		const connection = await this.runtimeHost.prepareRuntimeConnection(appConfigState.config, context);
+		return {
+			connection,
+			client: createResidentCoreClient(connection),
+		};
+	}
+
+	async createManagedAgent(options: { name?: string; trace?: TraceContext } = {}): Promise<ResidentCoreAgentMutationResult> {
+		const traceContext = options.trace ?? createSessionLoggerContext();
+		let createdAgentKey: string | undefined;
+		try {
+			const { connection, client } = await this.prepareAgentAdminContext(traceContext);
+			const previousActiveKey = this.getActiveAgentKey();
+			const createOptions = connection.modelHandle
+				? { model: connection.modelHandle }
+				: {};
+			const agentId = await createAgent(createOptions);
+			createdAgentKey = agentId;
+			let createdName = options.name?.trim();
+
+			if (createdName) {
+				try {
+					await client.agents.update(agentId, { name: createdName });
+				} catch (error) {
+					try {
+						await client.agents.delete(agentId);
+					} catch {
+						// best effort rollback
+					}
+					throw error;
+				}
+			}
+
+			const record = this.stateStore.upsertAgentRecord(
+				agentId,
+				{
+					agentId,
+					lastUsedAt: new Date().toISOString(),
+					...(createdName ? { name: createdName } : {}),
+					conversationMode: "shared",
+				},
+				false,
+			);
+			if (!record) {
+				throw new Error("Failed to persist created agent in the resident core registry.");
+			}
+
+			const currentActiveKey = this.getActiveAgentKey();
+			if (currentActiveKey !== agentId) {
+				if (!this.switchActiveAgent(agentId)) {
+					this.stateStore.deleteAgentRecord(agentId);
+					try {
+						await client.agents.delete(agentId);
+					} catch {
+						// best effort rollback
+					}
+					throw new Error("Failed to activate the created agent.");
+				}
+			} else if (previousActiveKey !== currentActiveKey) {
+				this.sharedIdentity.agentId = this.stateStore.getActiveAgentId();
+			}
+			this.sharedIdentity.agentId = this.stateStore.getActiveAgentId();
+
+			return {
+				success: true,
+				agentKey: agentId,
+				activeAgentKey: this.getActiveAgentKey(),
+				agent: this.getActiveAgentRecord(),
+				agents: this.listKnownAgents(),
+			};
+		} catch (error) {
+			return this.buildAgentMutationResult(
+				createdAgentKey ?? this.getActiveAgentKey(),
+				false,
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+	}
+
+	async renameManagedAgent(options: { agentKey: string; name: string; trace?: TraceContext }): Promise<ResidentCoreAgentMutationResult> {
+		const traceContext = options.trace ?? createSessionLoggerContext(options.agentKey);
+		const agentKey = options.agentKey.trim();
+		const nextName = options.name.trim();
+		const existing = this.stateStore.getAgentRecord(agentKey);
+		if (!existing) {
+			return this.buildAgentMutationResult(agentKey, false, `Unknown agent key: ${agentKey}`);
+		}
+
+		try {
+			const { client } = await this.prepareAgentAdminContext(traceContext);
+			await client.agents.update(existing.agentId, { name: nextName });
+			const updated = this.stateStore.upsertAgentRecord(
+				agentKey,
+				{
+					agentId: existing.agentId,
+					name: nextName,
+					lastUsedAt: new Date().toISOString(),
+					...(existing.conversationMode ? { conversationMode: existing.conversationMode } : {}),
+					...(existing.channels ? { channels: { ...existing.channels } } : {}),
+				},
+				false,
+			);
+			if (!updated) {
+				throw new Error("Failed to persist renamed agent in the resident core registry.");
+			}
+
+			return {
+				success: true,
+				agentKey,
+				activeAgentKey: this.getActiveAgentKey(),
+				agent: this.getActiveAgentRecord(),
+				agents: this.listKnownAgents(),
+			};
+		} catch (error) {
+			return this.buildAgentMutationResult(
+				agentKey,
+				false,
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+	}
+
+	async deleteManagedAgent(options: { agentKey: string; trace?: TraceContext }): Promise<ResidentCoreAgentMutationResult> {
+		const traceContext = options.trace ?? createSessionLoggerContext(options.agentKey);
+		const agentKey = options.agentKey.trim();
+		const existing = this.stateStore.getAgentRecord(agentKey);
+		if (!existing) {
+			return this.buildAgentMutationResult(agentKey, false, `Unknown agent key: ${agentKey}`);
+		}
+
+		const previousActiveKey = this.getActiveAgentKey();
+
+		try {
+			const { client } = await this.prepareAgentAdminContext(traceContext);
+			try {
+				await client.agents.delete(existing.agentId);
+			} catch (error) {
+				if (!isAgentMissingError(error)) {
+					throw error;
+				}
+			}
+
+			const removed = this.stateStore.deleteAgentRecord(agentKey);
+			if (!removed) {
+				throw new Error("Failed to remove agent from the resident core registry.");
+			}
+
+			if (previousActiveKey !== this.getActiveAgentKey()) {
+				this.clearSessionCaches();
+			}
+
+			return {
+				success: true,
+				agentKey,
+				activeAgentKey: this.getActiveAgentKey(),
+				agent: this.getActiveAgentRecord(),
+				agents: this.listKnownAgents(),
+			};
+		} catch (error) {
+			return this.buildAgentMutationResult(
+				agentKey,
+				false,
+				error instanceof Error ? error.message : String(error),
+			);
 		}
 	}
 
@@ -662,7 +916,7 @@ export class ResidentCoreSessionOwner {
 	}
 
 	getSharedAgentIdentity(): string | null {
-		return this.sharedIdentity.agentId;
+		return this.sharedIdentity.agentId || this.stateStore.getActiveAgentId();
 	}
 }
 

@@ -7,6 +7,14 @@ const ensureCodeIslandStartedMock = vi.hoisted(() => vi.fn(() => ({ status: "uns
 const startCodeIslandMonitorMock = vi.hoisted(() => vi.fn(() => ({ stop: vi.fn() })));
 const getResidentCoreLettaBotRuntimeConfigMock = vi.hoisted(() => vi.fn(() => ({
 	workingDir: "/tmp/letta-desktop-test/lettabot",
+	channels: {
+		telegram: {
+			token: "telegram-token",
+			dmPolicy: "open",
+			streaming: true,
+			workingDir: "/tmp/letta-desktop-test/lettabot",
+		},
+	},
 	telegram: {
 		token: "telegram-token",
 		dmPolicy: "open",
@@ -80,10 +88,12 @@ describe("main-runtime resident core wiring", () => {
 					conversationMode: "shared",
 					reuseSession: true,
 				}),
-				telegram: expect.objectContaining({
-					token: "telegram-token",
-					dmPolicy: "open",
-					streaming: true,
+				channels: expect.objectContaining({
+					telegram: expect.objectContaining({
+						token: "telegram-token",
+						dmPolicy: "open",
+						streaming: true,
+					}),
 				}),
 				backend,
 			}),
@@ -94,6 +104,7 @@ describe("main-runtime resident core wiring", () => {
 	it("no-ops Telegram startup when the runtime config is absent", async () => {
 		getResidentCoreLettaBotRuntimeConfigMock.mockReturnValue({
 			workingDir: "/tmp/letta-desktop-test/lettabot",
+			channels: {},
 			telegram: null,
 		});
 		const host = {
@@ -109,7 +120,7 @@ describe("main-runtime resident core wiring", () => {
 
 		expect(createResidentCoreLettaBotHostMock).toHaveBeenCalledWith(
 			expect.objectContaining({
-				telegram: null,
+				channels: {},
 			}),
 		);
 		expect(host.start).toHaveBeenCalledTimes(1);

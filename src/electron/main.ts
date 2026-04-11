@@ -51,6 +51,7 @@ let lettabotHost: import("./libs/resident-core/lettabot-host.js").ResidentCoreLe
 let residentCoreSessionOwner: import("./libs/resident-core/session-owner.js").ResidentCoreSessionOwner | null = null;
 let residentCoreService: ReturnType<typeof createResidentCoreService> | null = null;
 let lettabotBackend: SessionBackend | null = null;
+let cleanupPromise: Promise<void> | null = null;
 const mainLog = createComponentLogger("main");
 
 function maskTelegramToken(token?: string | null): string | null {
@@ -73,18 +74,23 @@ function summarizeResidentCoreLettaBotRuntimeConfig(
     };
 }
 
-function cleanupRuntime(): void {
-    if (cleanupComplete) return;
-    cleanupComplete = true;
+async function cleanupRuntime(): Promise<void> {
+    if (cleanupPromise) return cleanupPromise;
+    cleanupPromise = (async () => {
+        if (cleanupComplete) return;
+        cleanupComplete = true;
 
-    globalShortcut.unregisterAll();
-    flushDiagnosticsPersistence();
-    stopPolling();
-    stopElectronRuntimeServices(codeIslandMonitor, lettabotHost);
-    codeIslandMonitor = null;
-    lettabotHost = null;
-    cleanupAllSessions();
-    stopElectronDevelopmentServer();
+        globalShortcut.unregisterAll();
+        flushDiagnosticsPersistence();
+        stopPolling();
+        stopElectronRuntimeServices(codeIslandMonitor, lettabotHost);
+        codeIslandMonitor = null;
+        lettabotHost = null;
+        await cleanupAllSessions();
+        stopElectronDevelopmentServer();
+    })();
+
+    return cleanupPromise;
 }
 
 async function reloadResidentCoreTelegramRuntime(): Promise<void> {
@@ -108,7 +114,7 @@ async function reloadResidentCoreTelegramRuntime(): Promise<void> {
         await previousHost.stop();
     }
 
-    residentCoreService.cleanupAllSessions();
+    await residentCoreService.cleanupAllSessions();
     lettabotHost = null;
     lettabotBackend = null;
 
@@ -155,8 +161,7 @@ async function reloadResidentCoreTelegramRuntime(): Promise<void> {
 }
 
 function handleSignal(): void {
-    cleanupRuntime();
-    app.quit();
+    void cleanupRuntime().finally(() => app.exit(0));
 }
 
 function createMainWindow(): BrowserWindow {
@@ -192,8 +197,13 @@ function createMainWindow(): BrowserWindow {
 // Initialize everything when app is ready
 app.on("ready", () => {
     Menu.setApplicationMenu(null);
-    app.on("before-quit", cleanupRuntime);
-    app.on("will-quit", cleanupRuntime);
+    app.on("before-quit", (event: Electron.Event) => {
+        event.preventDefault();
+        void cleanupRuntime().finally(() => app.exit(0));
+    });
+    app.on("will-quit", () => {
+        void cleanupRuntime();
+    });
     app.on("window-all-closed", ((event: Electron.Event) => {
         event.preventDefault();
         stopPolling();
@@ -240,8 +250,7 @@ app.on("ready", () => {
     lettabotHost = runtimeServices.lettabotHost;
 
     globalShortcut.register('CommandOrControl+Q', () => {
-        cleanupRuntime();
-        app.quit();
+        void cleanupRuntime().finally(() => app.exit(0));
     });
 
     createMainWindow();

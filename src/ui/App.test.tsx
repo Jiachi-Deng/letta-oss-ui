@@ -41,12 +41,17 @@ vi.mock("./render/markdown", () => ({
 }));
 
 function resetAppStore() {
-	useAppStore.setState({
-		sessions: {},
-		activeSessionId: null,
-		prompt: "",
-		cwd: "",
-		pendingStart: false,
+  useAppStore.setState({
+    sessions: {},
+    activeSessionId: null,
+    activeAgentKey: null,
+    activeAgent: null,
+    knownAgents: [],
+    agentSwitchError: null,
+    agentMutationError: null,
+    prompt: "",
+    cwd: "",
+    pendingStart: false,
 		globalError: null,
 		sessionsLoaded: false,
 		showStartModal: false,
@@ -116,17 +121,17 @@ describe("App", () => {
 		vi.clearAllMocks();
 	});
 
-	function emitServerEvent(event: ServerEvent) {
+	async function emitServerEvent(event: ServerEvent) {
 		if (!serverEventHandler) {
 			throw new Error("Server event handler was not registered");
 		}
 
-		act(() => {
+		await act(async () => {
 			serverEventHandler?.(event);
 		});
 	}
 
-	it("keeps the prompt input enabled for an empty selected session", async () => {
+  it("keeps the prompt input enabled for an empty selected session", async () => {
 		useAppStore.setState({
 			sessions: {
 				"session-empty": {
@@ -142,17 +147,261 @@ describe("App", () => {
 			activeSessionId: "session-empty",
 		});
 
-		render(<App />);
+    render(<App />);
 
-		const promptInput = await screen.findByPlaceholderText(
-			"Describe what you want agent to handle...",
-		);
+    await waitFor(() => {
+      expect(sendClientEventMock).toHaveBeenCalledWith({ type: "session.list" });
+      expect(sendClientEventMock).toHaveBeenCalledWith({ type: "agent.active.get" });
+    });
+
+    const promptInput = await screen.findByPlaceholderText(
+      "Describe what you want agent to handle...",
+    );
 		const sendButton = screen.getByRole("button", { name: "Send prompt" });
 
-		expect(promptInput).toBeEnabled();
-		expect(sendButton).toBeEnabled();
-		expect(screen.getByText("No messages yet")).toBeInTheDocument();
-	});
+    expect(promptInput).toBeEnabled();
+    expect(sendButton).toBeEnabled();
+    expect(screen.getByText("No messages yet")).toBeInTheDocument();
+  });
+
+  it("updates the agent registry state from resident core events", async () => {
+    render(<App />);
+
+    await emitServerEvent({
+      type: "agent.active",
+      payload: {
+        activeAgentKey: "primary",
+        agent: {
+          agentId: "agent-primary-123456",
+          lastUsedAt: "2026-04-10T19:00:00.000Z",
+          conversationMode: "shared",
+        },
+        agents: [
+          {
+            key: "primary",
+            record: {
+              agentId: "agent-primary-123456",
+              lastUsedAt: "2026-04-10T19:00:00.000Z",
+              conversationMode: "shared",
+            },
+          },
+          {
+            key: "work",
+            record: {
+              agentId: "agent-work-abcdef",
+              lastUsedAt: "2026-04-10T19:05:00.000Z",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(useAppStore.getState()).toMatchObject({
+      activeAgentKey: "primary",
+      activeAgent: {
+        agentId: "agent-primary-123456",
+      },
+      knownAgents: expect.arrayContaining([
+        expect.objectContaining({
+          key: "primary",
+          record: expect.objectContaining({ agentId: "agent-primary-123456" }),
+        }),
+      ]),
+      agentSwitchError: null,
+    });
+
+    await emitServerEvent({
+      type: "agent.list",
+      payload: {
+        activeAgentKey: "work",
+        agents: [
+          {
+            key: "work",
+            record: {
+              agentId: "agent-work-abcdef",
+              lastUsedAt: "2026-04-10T19:05:00.000Z",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(useAppStore.getState()).toMatchObject({
+      activeAgentKey: "work",
+      knownAgents: [
+        {
+          key: "work",
+          record: {
+            agentId: "agent-work-abcdef",
+            lastUsedAt: "2026-04-10T19:05:00.000Z",
+          },
+        },
+      ],
+    });
+
+    await emitServerEvent({
+      type: "agent.switch.result",
+      payload: {
+        success: false,
+        activeAgentKey: "work",
+        agent: {
+          agentId: "agent-work-abcdef",
+          lastUsedAt: "2026-04-10T19:05:00.000Z",
+        },
+        agents: [
+          {
+            key: "work",
+            record: {
+              agentId: "agent-work-abcdef",
+              lastUsedAt: "2026-04-10T19:05:00.000Z",
+            },
+          },
+        ],
+        error: "Unknown agent key: missing",
+      },
+    });
+
+    expect(useAppStore.getState()).toMatchObject({
+      activeAgentKey: "work",
+      agentSwitchError: "Unknown agent key: missing",
+    });
+  });
+
+  it("applies create, rename, and delete registry results from resident core events", async () => {
+    render(<App />);
+
+    await emitServerEvent({
+      type: "agent.create.result",
+      payload: {
+        success: true,
+        agentKey: "agent-new",
+        activeAgentKey: "agent-new",
+        agent: {
+          agentId: "agent-new",
+          name: "New Agent",
+          lastUsedAt: "2026-04-10T20:00:00.000Z",
+          conversationMode: "shared",
+        },
+        agents: [
+          {
+            key: "agent-new",
+            record: {
+              agentId: "agent-new",
+              name: "New Agent",
+              lastUsedAt: "2026-04-10T20:00:00.000Z",
+              conversationMode: "shared",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(useAppStore.getState()).toMatchObject({
+      activeAgentKey: "agent-new",
+      activeAgent: {
+        agentId: "agent-new",
+        name: "New Agent",
+      },
+      knownAgents: [
+        {
+          key: "agent-new",
+          record: {
+            agentId: "agent-new",
+            name: "New Agent",
+          },
+        },
+      ],
+      agentMutationError: null,
+    });
+
+    await emitServerEvent({
+      type: "agent.rename.result",
+      payload: {
+        success: true,
+        agentKey: "agent-new",
+        activeAgentKey: "agent-new",
+        agent: {
+          agentId: "agent-new",
+          name: "Renamed Agent",
+          lastUsedAt: "2026-04-10T20:05:00.000Z",
+          conversationMode: "shared",
+        },
+        agents: [
+          {
+            key: "agent-new",
+            record: {
+              agentId: "agent-new",
+              name: "Renamed Agent",
+              lastUsedAt: "2026-04-10T20:05:00.000Z",
+              conversationMode: "shared",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(useAppStore.getState()).toMatchObject({
+      activeAgentKey: "agent-new",
+      activeAgent: {
+        agentId: "agent-new",
+        name: "Renamed Agent",
+      },
+      knownAgents: [
+        {
+          key: "agent-new",
+          record: {
+            agentId: "agent-new",
+            name: "Renamed Agent",
+          },
+        },
+      ],
+      agentMutationError: null,
+    });
+
+    await emitServerEvent({
+      type: "agent.delete.result",
+      payload: {
+        success: true,
+        agentKey: "agent-new",
+        activeAgentKey: "primary",
+        agent: {
+          agentId: "agent-primary-123456",
+          name: "Companion",
+          lastUsedAt: "2026-04-10T20:10:00.000Z",
+          conversationMode: "shared",
+        },
+        agents: [
+          {
+            key: "primary",
+            record: {
+              agentId: "agent-primary-123456",
+              name: "Companion",
+              lastUsedAt: "2026-04-10T20:10:00.000Z",
+              conversationMode: "shared",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(useAppStore.getState()).toMatchObject({
+      activeAgentKey: "primary",
+      activeAgent: {
+        agentId: "agent-primary-123456",
+        name: "Companion",
+      },
+      knownAgents: [
+        {
+          key: "primary",
+          record: {
+            agentId: "agent-primary-123456",
+            name: "Companion",
+          },
+        },
+      ],
+      agentMutationError: null,
+    });
+  });
 
 	it("shows a clear warning when CodeIsland is unsupported on this macOS version", async () => {
 		getStaticDataMock.mockResolvedValue({
@@ -308,7 +557,7 @@ describe("App", () => {
 			expect(sendClientEventMock).toHaveBeenCalledWith({ type: "session.list" });
 		});
 
-		emitServerEvent({ type: "session.list", payload: { sessions: [] } });
+		await emitServerEvent({ type: "session.list", payload: { sessions: [] } });
 
 		await user.type(screen.getByPlaceholderText("/path/to/project"), "/tmp/project");
 		await user.type(
@@ -332,7 +581,7 @@ describe("App", () => {
 			expect(startButton).toBeDisabled();
 		});
 
-		emitServerEvent({
+		await emitServerEvent({
 			type: "runner.error",
 			payload: { message: "Compatible bootstrap failed", traceId: "trc_runner_error" },
 		});
@@ -360,7 +609,7 @@ describe("App", () => {
 		});
 
 		render(<App />);
-		emitServerEvent({
+		await emitServerEvent({
 			type: "runner.error",
 			payload: { message: "Conversation id missing", sessionId: "conv_session_latest" },
 		});
@@ -379,7 +628,7 @@ describe("App", () => {
 			expect(sendClientEventMock).toHaveBeenCalledWith({ type: "session.list" });
 		});
 
-		emitServerEvent({ type: "session.list", payload: { sessions: [] } });
+		await emitServerEvent({ type: "session.list", payload: { sessions: [] } });
 
 		await user.type(screen.getByPlaceholderText("/path/to/project"), "/tmp/project");
 		await user.type(
@@ -400,7 +649,7 @@ describe("App", () => {
 			});
 		});
 
-		emitServerEvent({
+		await emitServerEvent({
 			type: "session.status",
 			payload: {
 				sessionId: "conv-123",
@@ -454,7 +703,7 @@ describe("App", () => {
 			});
 		});
 
-		emitServerEvent({
+		await emitServerEvent({
 			type: "session.status",
 			payload: {
 				sessionId: "conv-race",
@@ -464,7 +713,7 @@ describe("App", () => {
 			},
 		});
 
-		emitServerEvent({
+		await emitServerEvent({
 			type: "stream.user_prompt",
 			payload: {
 				sessionId: "conv-race",
@@ -472,7 +721,7 @@ describe("App", () => {
 			},
 		});
 
-		emitServerEvent({ type: "session.list", payload: { sessions: [] } });
+		await emitServerEvent({ type: "session.list", payload: { sessions: [] } });
 
 		await waitFor(() => {
 			expect(useAppStore.getState().activeSessionId).toBe("conv-race");

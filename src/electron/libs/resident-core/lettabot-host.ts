@@ -7,7 +7,7 @@ import type { BotObservabilityObserver, SessionBackend } from "lettabot/core/int
 import type { BotConfig } from "lettabot/core/types.js";
 import type { AgentConfig } from "lettabot/config/types.js";
 import { createComponentLogger, createTraceContext, emitStructuredLog } from "../trace.js";
-import type { ResidentCoreTelegramStartupConfig } from "../config.js";
+import type { ResidentCoreChannelsConfig, ResidentCoreTelegramStartupConfig } from "../config.js";
 import { createResidentCoreSessionBackend } from "./resident-core-session-backend.js";
 import { isDecisionId } from "../../../shared/decision-ids.js";
 import { isErrorCode } from "../../../shared/error-codes.js";
@@ -28,6 +28,12 @@ function summarizeTelegramConfig(telegram: ResidentCoreTelegramStartupConfig | n
 		dmPolicy: telegram?.dmPolicy ?? null,
 		streaming: telegram?.streaming ?? null,
 		workingDir: telegram?.workingDir ?? null,
+	};
+}
+
+function summarizeResidentCoreChannelsConfig(channels: ResidentCoreChannelsConfig | null): Record<string, unknown> {
+	return {
+		telegram: summarizeTelegramConfig(channels?.telegram ?? null),
 	};
 }
 
@@ -53,7 +59,7 @@ export type ResidentCoreLettaBotFactory = (
 export type ResidentCoreLettaBotHostOptions = {
 	config: BotConfig;
 	backend?: SessionBackend;
-	telegram?: ResidentCoreTelegramStartupConfig | null;
+	channels?: ResidentCoreChannelsConfig | null;
 	createBot?: ResidentCoreLettaBotFactory;
 };
 
@@ -77,21 +83,33 @@ function normalizeTelegramConfig(telegram?: ResidentCoreTelegramStartupConfig | 
 	};
 }
 
-function createTelegramAgentConfig(
+function normalizeResidentCoreChannelsConfig(channels?: ResidentCoreChannelsConfig | null): ResidentCoreChannelsConfig | null {
+	if (!channels || !Object.prototype.hasOwnProperty.call(channels, "telegram")) return null;
+
+	const telegram = normalizeTelegramConfig(channels.telegram);
+	return {
+		telegram: telegram ?? null,
+	};
+}
+
+function createResidentCoreAgentConfig(
 	botConfig: BotConfig,
-	telegram: ResidentCoreTelegramStartupConfig,
+	channels: ResidentCoreChannelsConfig,
 ): AgentConfig {
+	const telegram = channels.telegram;
 	return {
 		name: botConfig.agentName ?? "ResidentCoreLettaBot",
 		workingDir: botConfig.workingDir,
-		channels: {
-			telegram: {
-				enabled: true,
-				token: telegram.token!,
-				dmPolicy: telegram.dmPolicy ?? "open",
-				streaming: telegram.streaming ?? true,
-			},
-		},
+		channels: telegram
+			? {
+				telegram: {
+					enabled: true,
+					token: telegram.token!,
+					dmPolicy: telegram.dmPolicy ?? "open",
+					streaming: telegram.streaming ?? true,
+				},
+			}
+			: {},
 		conversations: {
 			mode: botConfig.conversationMode,
 			reuseSession: botConfig.reuseSession,
@@ -142,13 +160,14 @@ export class ResidentCoreLettaBotHost {
 
 	async start(): Promise<void> {
 		if (this.started) return;
-		const telegram = normalizeTelegramConfig(this.options.telegram);
+		const channels = normalizeResidentCoreChannelsConfig(this.options.channels);
+		const telegram = channels?.telegram ?? null;
 		log({
 			level: "info",
 			decision_id: "LETTABOT_HOST_START_001",
 			message: "Resident Core LettaBot host start entered",
 			data: {
-				telegram: summarizeTelegramConfig(telegram),
+				channels: summarizeResidentCoreChannelsConfig(channels),
 			},
 		});
 		if (!telegram) {
@@ -194,7 +213,7 @@ export class ResidentCoreLettaBotHost {
 				},
 			});
 
-			const agentConfig = createTelegramAgentConfig(runtimeBotConfig, telegram);
+			const agentConfig = createResidentCoreAgentConfig(runtimeBotConfig, channels ?? {});
 			const adapters = createChannelsForAgent(agentConfig, runtimeBotConfig.workingDir, DEFAULT_ATTACHMENTS_MAX_BYTES);
 			log({
 				level: "info",

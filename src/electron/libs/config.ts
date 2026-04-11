@@ -37,12 +37,19 @@ export type ResidentCoreTelegramStartupConfig = {
   workingDir?: string;
 };
 
+export type ResidentCoreChannelName = "telegram";
+
+export type ResidentCoreChannelsConfig = Partial<
+  Record<ResidentCoreChannelName, ResidentCoreTelegramStartupConfig | null>
+>;
+
 export type ResidentCoreConfig = {
-  telegram?: ResidentCoreTelegramStartupConfig;
+  channels?: ResidentCoreChannelsConfig;
 };
 
 export type ResidentCoreLettaBotRuntimeConfig = {
   workingDir: string;
+  channels: ResidentCoreChannelsConfig;
   telegram: ResidentCoreTelegramStartupConfig | null;
 };
 
@@ -112,14 +119,36 @@ function normalizeResidentCoreTelegramConfig(value: unknown): ResidentCoreTelegr
   return config;
 }
 
+function normalizeResidentCoreChannelsConfig(value: unknown): ResidentCoreChannelsConfig | undefined {
+  if (!value || typeof value !== "object") return undefined;
+
+  const raw = value as Partial<Record<ResidentCoreChannelName, unknown>>;
+  const hasTelegram = Object.prototype.hasOwnProperty.call(raw, "telegram");
+  if (!hasTelegram) return undefined;
+
+  const telegram = normalizeResidentCoreTelegramConfig(raw.telegram);
+  return {
+    telegram: telegram ?? null,
+  };
+}
+
 function normalizeResidentCoreConfig(value: unknown): ResidentCoreConfig | undefined {
   if (!value || typeof value !== "object") return undefined;
 
-  const raw = value as Partial<Record<keyof ResidentCoreConfig, unknown>>;
-  const telegram = normalizeResidentCoreTelegramConfig(raw.telegram);
-  if (!telegram) return undefined;
+  const raw = value as Record<string, unknown>;
+  const channels = normalizeResidentCoreChannelsConfig(raw.channels);
+  if (channels) {
+    return { channels };
+  }
 
-  return { telegram };
+  if (!Object.prototype.hasOwnProperty.call(raw, "telegram")) return undefined;
+
+  const telegram = normalizeResidentCoreTelegramConfig(raw.telegram);
+  return {
+    channels: {
+      telegram: telegram ?? null,
+    },
+  };
 }
 
 function normalizeConnectionType(value: unknown, baseUrl?: string): ConnectionType {
@@ -466,15 +495,16 @@ export function saveAppConfig(configInput: Partial<LettaAppConfig>): AppConfigSt
 }
 
 export function getResidentCoreLettaBotRuntimeConfig(): ResidentCoreLettaBotRuntimeConfig {
-  const appConfigTelegram = getAppConfigState().config.residentCore?.telegram;
+  const appConfigTelegram = getAppConfigState().config.residentCore?.channels?.telegram;
   const envTelegram = readResidentCoreTelegramFromEnv();
   const telegram = normalizeResidentCoreTelegramConfig({
-    ...appConfigTelegram,
-    ...envTelegram,
+    ...(appConfigTelegram && typeof appConfigTelegram === "object" ? appConfigTelegram : {}),
+    ...(envTelegram ?? {}),
   });
 
   return {
     workingDir: telegram?.workingDir ?? join(app.getPath("userData"), "lettabot"),
+    channels: telegram ? { telegram } : {},
     telegram: telegram ?? null,
   };
 }

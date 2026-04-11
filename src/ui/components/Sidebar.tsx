@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useAppStore } from "../store/useAppStore";
@@ -9,20 +9,36 @@ interface SidebarProps {
   onDeleteSession: (sessionId: string) => void;
   onOpenSettings: () => void;
   onOpenDiagnostics: () => void;
+  onAgentSwitch: (agentKey: string) => void;
+  onAgentCreate: (name?: string) => void;
+  onAgentRename: (agentKey: string, name: string) => void;
+  onAgentDelete: (agentKey: string) => void;
   activeView: "chat" | "diagnostics";
 }
 
 export function Sidebar({
+  connected,
   onNewSession,
   onDeleteSession,
   onOpenSettings,
   onOpenDiagnostics,
+  onAgentSwitch,
+  onAgentCreate,
+  onAgentRename,
+  onAgentDelete,
   activeView,
 }: SidebarProps) {
   const sessions = useAppStore((state) => state.sessions);
   const activeSessionId = useAppStore((state) => state.activeSessionId);
   const setActiveSessionId = useAppStore((state) => state.setActiveSessionId);
+  const activeAgentKey = useAppStore((state) => state.activeAgentKey);
+  const activeAgent = useAppStore((state) => state.activeAgent);
+  const knownAgents = useAppStore((state) => state.knownAgents);
+  const agentSwitchError = useAppStore((state) => state.agentSwitchError);
+  const agentMutationError = useAppStore((state) => state.agentMutationError);
   const [resumeSessionId, setResumeSessionId] = useState<string | null>(null);
+  const [agentEditorMode, setAgentEditorMode] = useState<"create" | "rename" | null>(null);
+  const [agentDraftName, setAgentDraftName] = useState("");
   const [copied, setCopied] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
 
@@ -38,6 +54,38 @@ export function Sidebar({
     list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     return list;
   }, [sessions]);
+
+  const activeAgentDisplay = useMemo(() => {
+    if (!activeAgentKey) return "Waiting for agent info";
+    const displayName = activeAgent?.name?.trim() || activeAgentKey;
+    const shortAgentId = activeAgent?.agentId
+      ? `${activeAgent.agentId.slice(0, 8)}${activeAgent.agentId.length > 8 ? "…" : ""}`
+      : null;
+    return shortAgentId ? `${displayName} · ${shortAgentId}` : displayName;
+  }, [activeAgent, activeAgentKey]);
+
+  const selectedAgentKey = useMemo(() => {
+    if (!activeAgentKey) return "";
+    return knownAgents.some((agent) => agent.key === activeAgentKey) ? activeAgentKey : "";
+  }, [activeAgentKey, knownAgents]);
+
+  const agentActionError = agentMutationError || agentSwitchError;
+  const canEditActiveAgent = connected && Boolean(activeAgentKey);
+  const canDeleteActiveAgent = connected && Boolean(activeAgentKey) && knownAgents.length > 1;
+
+  useEffect(() => {
+    if (!agentEditorMode) {
+      setAgentDraftName("");
+      return;
+    }
+
+    if (agentEditorMode === "create") {
+      setAgentDraftName("");
+      return;
+    }
+
+    setAgentDraftName(activeAgent?.name?.trim() || activeAgentKey || "");
+  }, [agentEditorMode, activeAgent?.name, activeAgentKey]);
 
   useEffect(() => {
     setCopied(false);
@@ -73,6 +121,26 @@ export function Sidebar({
     }, 3000);
   };
 
+  const handleSubmitAgentEditor = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextName = agentDraftName.trim();
+
+    if (agentEditorMode === "rename") {
+      if (!activeAgentKey || !nextName) return;
+      onAgentRename(activeAgentKey, nextName);
+    } else if (agentEditorMode === "create") {
+      onAgentCreate(nextName || undefined);
+    }
+
+    setAgentEditorMode(null);
+    setAgentDraftName("");
+  };
+
+  const handleDeleteActiveAgent = () => {
+    if (!canDeleteActiveAgent || !activeAgentKey) return;
+    onAgentDelete(activeAgentKey);
+  };
+
   return (
     <aside className="fixed inset-y-0 left-0 flex h-full w-[280px] flex-col gap-4 border-r border-border bg-sidebar px-4 pb-4 pt-12">
       <div 
@@ -86,6 +154,110 @@ export function Sidebar({
         >
           + New Task
         </button>
+      </div>
+      <div className="rounded-xl border border-ink-900/10 bg-surface px-3 py-3">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Active Agent</div>
+        <div className="mt-2 flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium text-ink-800">{activeAgentDisplay}</div>
+            <div className="truncate text-[11px] text-muted">
+              {activeAgent?.agentId ? `ID ${activeAgent.agentId}` : "No durable agent loaded"}
+            </div>
+          </div>
+          <select
+            aria-label="Switch active agent"
+            className="max-w-[120px] rounded-lg border border-ink-900/10 bg-surface-secondary px-2 py-1 text-xs text-ink-700 outline-none transition-colors hover:border-ink-900/20 focus:border-accent"
+            value={selectedAgentKey}
+            onChange={(event) => {
+              const nextKey = event.target.value;
+              if (!nextKey || nextKey === activeAgentKey) return;
+              onAgentSwitch(nextKey);
+            }}
+            disabled={!connected || knownAgents.length === 0}
+          >
+            {knownAgents.length === 0 ? (
+              <option value="">No agents</option>
+            ) : (
+              <>
+                <option value="">Select agent…</option>
+                {knownAgents.map((agent) => {
+                  const shortId = agent.record.agentId.slice(0, 8);
+                  return (
+                    <option key={agent.key} value={agent.key}>
+                      {agent.key} · {shortId}
+                    </option>
+                  );
+                })}
+              </>
+            )}
+          </select>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            className="rounded-lg border border-ink-900/10 bg-surface-secondary px-2.5 py-1.5 text-[11px] font-medium text-ink-700 transition-colors hover:border-ink-900/20 hover:bg-surface-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => setAgentEditorMode("create")}
+            disabled={!connected}
+          >
+            Create agent
+          </button>
+          <button
+            className="rounded-lg border border-ink-900/10 bg-surface-secondary px-2.5 py-1.5 text-[11px] font-medium text-ink-700 transition-colors hover:border-ink-900/20 hover:bg-surface-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => {
+              if (!activeAgentKey) return;
+              setAgentEditorMode("rename");
+            }}
+            disabled={!canEditActiveAgent}
+          >
+            Rename active
+          </button>
+          <button
+            className="rounded-lg border border-ink-900/10 bg-surface-secondary px-2.5 py-1.5 text-[11px] font-medium text-ink-700 transition-colors hover:border-ink-900/20 hover:bg-surface-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={handleDeleteActiveAgent}
+            disabled={!canDeleteActiveAgent}
+            title={knownAgents.length <= 1 ? "Keep at least one agent before deleting." : undefined}
+          >
+            Delete active
+          </button>
+        </div>
+        {agentEditorMode && (
+          <form className="mt-3 rounded-xl border border-ink-900/10 bg-surface-secondary p-3" onSubmit={handleSubmitAgentEditor}>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+              {agentEditorMode === "create" ? "Create agent" : "Rename active agent"}
+            </div>
+            <input
+              autoFocus
+              aria-label={agentEditorMode === "create" ? "Create agent name" : "Rename active agent name"}
+              className="mt-2 w-full rounded-lg border border-ink-900/10 bg-surface px-3 py-2 text-sm text-ink-800 outline-none transition-colors placeholder:text-muted focus:border-accent"
+              placeholder={agentEditorMode === "create" ? "Optional agent name" : "Agent name"}
+              value={agentDraftName}
+              onChange={(event) => setAgentDraftName(event.target.value)}
+            />
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-ink-900/10 bg-surface px-3 py-1.5 text-xs font-medium text-ink-700 transition-colors hover:border-ink-900/20 hover:bg-surface-tertiary"
+                onClick={() => {
+                  setAgentEditorMode(null);
+                  setAgentDraftName("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="rounded-lg border border-accent/20 bg-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={agentEditorMode === "rename" && !agentDraftName.trim()}
+              >
+                Save
+              </button>
+            </div>
+          </form>
+        )}
+        {agentActionError && (
+          <div className="mt-2 text-[11px] text-error" role="alert">
+            {agentActionError}
+          </div>
+        )}
       </div>
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
         {sessionList.length === 0 && (

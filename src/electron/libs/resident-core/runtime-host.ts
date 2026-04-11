@@ -2,7 +2,7 @@ import type { AppConfigState } from "../config.js";
 import { getAppConfigState } from "../config.js";
 import {
   prepareRuntimeConnection,
-  type RuntimeConnectionInfo,
+  type RuntimeConnectionInfo as ProviderRuntimeConnectionInfo,
 } from "../provider-bootstrap.js";
 import { createComponentLogger, createTraceContext, createTurnId } from "../trace.js";
 import {
@@ -11,6 +11,8 @@ import {
   RC_RUNTIME_PREP_003,
 } from "../../../shared/decision-ids.js";
 import { E_RESIDENT_CORE_RUNTIME_PREP_FAILED } from "../../../shared/error-codes.js";
+
+export type RuntimeConnectionInfo = ProviderRuntimeConnectionInfo;
 
 const log = createComponentLogger("resident-core-runtime-host");
 

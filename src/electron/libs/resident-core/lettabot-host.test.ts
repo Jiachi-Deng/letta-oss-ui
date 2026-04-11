@@ -63,11 +63,13 @@ describe("ResidentCoreLettaBotHost", () => {
 				reuseSession: true,
 				agentName: "ResidentCoreLettaBot",
 			},
-			telegram: {
-				token: "telegram-token",
-				dmPolicy: "open",
-				streaming: true,
-				workingDir: "/tmp/letta-desktop-test/lettabot",
+			channels: {
+				telegram: {
+					token: "telegram-token",
+					dmPolicy: "open",
+					streaming: true,
+					workingDir: "/tmp/letta-desktop-test/lettabot",
+				},
 			},
 			createBot: vi.fn(() => bot) as never,
 		});
@@ -118,7 +120,9 @@ describe("ResidentCoreLettaBotHost", () => {
 				reuseSession: true,
 				agentName: "ResidentCoreLettaBot",
 			},
-			telegram: null,
+			channels: {
+				telegram: null,
+			},
 			createBot: createBot as never,
 		});
 

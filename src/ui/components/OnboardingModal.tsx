@@ -57,15 +57,15 @@ export function OnboardingModal({
   const [baseUrl, setBaseUrl] = useState(configState.config.LETTA_BASE_URL);
   const [apiKey, setApiKey] = useState(configState.config.LETTA_API_KEY ?? "");
   const [model, setModel] = useState(configState.config.model ?? "");
-  const [telegramToken, setTelegramToken] = useState(configState.config.residentCore?.telegram?.token ?? "");
+  const [telegramToken, setTelegramToken] = useState(configState.config.residentCore?.channels?.telegram?.token ?? "");
   const [telegramDmPolicy, setTelegramDmPolicy] = useState<TelegramDmPolicy>(
-    configState.config.residentCore?.telegram?.dmPolicy ?? "open",
+    configState.config.residentCore?.channels?.telegram?.dmPolicy ?? "open",
   );
   const [telegramStreaming, setTelegramStreaming] = useState(
-    configState.config.residentCore?.telegram?.streaming ?? true,
+    configState.config.residentCore?.channels?.telegram?.streaming ?? true,
   );
   const [telegramWorkingDir, setTelegramWorkingDir] = useState(
-    configState.config.residentCore?.telegram?.workingDir ?? "",
+    configState.config.residentCore?.channels?.telegram?.workingDir ?? "",
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +104,9 @@ export function OnboardingModal({
         LETTA_API_KEY: trimmedApiKey || undefined,
         model: model.trim() || undefined,
         residentCore: {
-          telegram: buildTelegramConfig(telegramToken, telegramDmPolicy, telegramStreaming, telegramWorkingDir),
+          channels: {
+            telegram: buildTelegramConfig(telegramToken, telegramDmPolicy, telegramStreaming, telegramWorkingDir),
+          },
         },
       });
       onSaved(nextState);

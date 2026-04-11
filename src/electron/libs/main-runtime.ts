@@ -36,11 +36,13 @@ export type ElectronRuntimeServices = {
   lettabotHost: ResidentCoreLettaBotHost | null;
 };
 
-export type ResidentCoreTelegramRuntimeBundle = {
+export type ResidentCoreChannelsRuntimeBundle = {
   backend: SessionBackend;
   lettabotHost: ResidentCoreLettaBotHost;
   runtimeConfig: ResidentCoreLettaBotRuntimeConfig;
 };
+
+export type ResidentCoreTelegramRuntimeBundle = ResidentCoreChannelsRuntimeBundle;
 
 const runtimeLog = createComponentLogger("main-runtime");
 
@@ -50,15 +52,19 @@ function maskTelegramToken(token?: string | null): string | null {
   return `***${trimmedToken.slice(-4)}`;
 }
 
-function summarizeTelegramRuntimeConfig(config: ResidentCoreLettaBotRuntimeConfig): Record<string, unknown> {
-  const telegram: ResidentCoreTelegramStartupConfig | null = config.telegram;
+function summarizeResidentCoreChannelsRuntimeConfig(config: ResidentCoreLettaBotRuntimeConfig): Record<string, unknown> {
+  const telegram: ResidentCoreTelegramStartupConfig | null = config.channels.telegram ?? null;
   return {
     workingDir: config.workingDir,
-    hasToken: Boolean(telegram?.token?.trim()),
-    tokenTail: maskTelegramToken(telegram?.token),
-    dmPolicy: telegram?.dmPolicy ?? null,
-    streaming: telegram?.streaming ?? null,
-    telegramWorkingDir: telegram?.workingDir ?? null,
+    channels: {
+      telegram: {
+        hasToken: Boolean(telegram?.token?.trim()),
+        tokenTail: maskTelegramToken(telegram?.token),
+        dmPolicy: telegram?.dmPolicy ?? null,
+        streaming: telegram?.streaming ?? null,
+        workingDir: telegram?.workingDir ?? null,
+      },
+    },
   };
 }
 
@@ -119,9 +125,9 @@ export function bootstrapElectronRuntime(): void {
   configureLettaCliPathFromSystem();
 }
 
-export function createResidentCoreTelegramRuntimeBundle(
+export function createResidentCoreChannelsRuntimeBundle(
   sessionOwner: ResidentCoreSessionOwner,
-): ResidentCoreTelegramRuntimeBundle {
+): ResidentCoreChannelsRuntimeBundle {
   const runtimeConfig = getResidentCoreLettaBotRuntimeConfig();
   const botConfig = createResidentCoreLettaBotConfig(runtimeConfig);
   const backend = createResidentCoreSessionBackend({
@@ -131,7 +137,7 @@ export function createResidentCoreTelegramRuntimeBundle(
   const lettabotHost = createResidentCoreLettaBotHost({
     config: botConfig,
     backend,
-    telegram: runtimeConfig.telegram,
+    channels: runtimeConfig.channels,
   });
 
   return {
@@ -140,6 +146,8 @@ export function createResidentCoreTelegramRuntimeBundle(
     runtimeConfig,
   };
 }
+
+export const createResidentCoreTelegramRuntimeBundle = createResidentCoreChannelsRuntimeBundle;
 
 export function stopElectronDevelopmentServer(): void {
   if (!isDev()) {
@@ -218,7 +226,7 @@ export function startElectronRuntimeServices(lettabotBackend: SessionBackend): E
   const lettabotHost = createResidentCoreLettaBotHost({
     config: createResidentCoreLettaBotConfig(lettabotRuntimeConfig),
     backend: lettabotBackend,
-    telegram: lettabotRuntimeConfig.telegram,
+    channels: lettabotRuntimeConfig.channels,
   });
 
   runtimeLog({
@@ -227,7 +235,7 @@ export function startElectronRuntimeServices(lettabotBackend: SessionBackend): E
     message: "resident-core lettabot host startup requested",
     trace_id: serverTrace.traceId,
     turn_id: serverTrace.turnId,
-    data: summarizeTelegramRuntimeConfig(lettabotRuntimeConfig),
+    data: summarizeResidentCoreChannelsRuntimeConfig(lettabotRuntimeConfig),
   });
 
   void lettabotHost.start().catch((error) => {
@@ -250,7 +258,7 @@ export function startElectronRuntimeServices(lettabotBackend: SessionBackend): E
     message: "resident-core lettabot host startup dispatched",
     trace_id: serverTrace.traceId,
     turn_id: serverTrace.turnId,
-    data: summarizeTelegramRuntimeConfig(lettabotRuntimeConfig),
+    data: summarizeResidentCoreChannelsRuntimeConfig(lettabotRuntimeConfig),
   });
 
   if (codeIslandStartup.status === "launched" && codeIslandStartup.resolution) {

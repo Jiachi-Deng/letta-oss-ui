@@ -1,9 +1,10 @@
 /**
- * Transient in-memory projection of active sessions for the desktop UI.
+ * Hot in-memory projection of active sessions for the desktop UI.
  *
- * Letta server is the persistence authority for conversations, messages, and
- * agent state. This module only keeps ephemeral view/cache state so the app can
- * render active sessions and pending approvals while a turn is in flight.
+ * Letta server remains the persistence authority for conversations, messages,
+ * and agent state. Resident Core now adds a lightweight durable snapshot for
+ * this projection, but this module still keeps the live cache used by the
+ * streaming/event hot path.
  */
 
 import type {

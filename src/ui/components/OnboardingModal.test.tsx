@@ -31,11 +31,13 @@ describe("OnboardingModal", () => {
         LETTA_API_KEY: "api-key",
         model: "MiniMax-M2.7",
         residentCore: {
-          telegram: {
-            token: "telegram-token",
-            dmPolicy: "allowlist",
-            streaming: false,
-            workingDir: "/tmp/project",
+          channels: {
+            telegram: {
+              token: "telegram-token",
+              dmPolicy: "allowlist",
+              streaming: false,
+              workingDir: "/tmp/project",
+            },
           },
         },
       },
@@ -69,11 +71,13 @@ describe("OnboardingModal", () => {
     await waitFor(() => expect(saveAppConfigMock).toHaveBeenCalledTimes(1));
     expect(saveAppConfigMock).toHaveBeenCalledWith(expect.objectContaining({
       residentCore: {
-        telegram: {
-          token: "new-token",
-          dmPolicy: "open",
-          streaming: true,
-          workingDir: "/Users/jachi/Desktop/letta-workspace",
+        channels: {
+          telegram: {
+            token: "new-token",
+            dmPolicy: "open",
+            streaming: true,
+            workingDir: "/Users/jachi/Desktop/letta-workspace",
+          },
         },
       },
     }));
@@ -88,6 +92,11 @@ describe("OnboardingModal", () => {
         LETTA_BASE_URL: "https://api.letta.com",
         LETTA_API_KEY: "api-key",
         model: "MiniMax-M2.7",
+        residentCore: {
+          channels: {
+            telegram: null,
+          },
+        },
       },
     });
     const nextState = makeConfigState({
@@ -107,7 +116,9 @@ describe("OnboardingModal", () => {
     await waitFor(() => expect(saveAppConfigMock).toHaveBeenCalledTimes(1));
     expect(saveAppConfigMock).toHaveBeenCalledWith(expect.objectContaining({
       residentCore: {
-        telegram: null,
+        channels: {
+          telegram: null,
+        },
       },
     }));
   });

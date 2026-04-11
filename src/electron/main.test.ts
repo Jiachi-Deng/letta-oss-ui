@@ -45,6 +45,7 @@ vi.mock("electron", () => {
 			return app;
 		}),
 		quit: vi.fn(),
+		exit: vi.fn(),
 		getPath: vi.fn(() => "/tmp/letta-desktop-test"),
 		setName: vi.fn(),
 		setAppUserModelId: vi.fn(),
@@ -215,7 +216,7 @@ describe("main lifecycle", () => {
 		expect(lettabotHostStopMock).not.toHaveBeenCalled();
 		expect(cleanupAllSessionsMock).not.toHaveBeenCalled();
 		expect(stopElectronDevelopmentServerMock).not.toHaveBeenCalled();
-		expect(app.quit).not.toHaveBeenCalled();
+		expect(app.exit).not.toHaveBeenCalled();
 
 		windows[0].emitClosed();
 
@@ -223,7 +224,7 @@ describe("main lifecycle", () => {
 		expect(lettabotHostStopMock).not.toHaveBeenCalled();
 		expect(cleanupAllSessionsMock).not.toHaveBeenCalled();
 		expect(stopElectronDevelopmentServerMock).not.toHaveBeenCalled();
-		expect(app.quit).not.toHaveBeenCalled();
+		expect(app.exit).not.toHaveBeenCalled();
 		expect(windows).toHaveLength(1);
 		expect(windows[0].closed).toBe(true);
 	});
@@ -250,7 +251,10 @@ describe("main lifecycle", () => {
 		startElectronRuntimeServicesMock.mockReturnValue({ codeIslandMonitor: { stop: vi.fn() }, lettabotHost: { stop: lettabotHostStopMock } });
 
 		getHandler("ready")();
-		getHandler("before-quit")();
+		const preventDefault = vi.fn();
+		getHandler("before-quit")({ preventDefault });
+		expect(preventDefault).toHaveBeenCalledTimes(1);
+		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		expect(stopElectronRuntimeServicesMock).toHaveBeenCalledTimes(1);
 		expect(stopElectronRuntimeServicesMock).toHaveBeenCalledWith(
@@ -259,7 +263,7 @@ describe("main lifecycle", () => {
 		);
 		expect(cleanupAllSessionsMock).toHaveBeenCalledTimes(1);
 		expect(stopElectronDevelopmentServerMock).toHaveBeenCalledTimes(1);
-		expect(app.quit).not.toHaveBeenCalled();
+		expect(app.exit).toHaveBeenCalledWith(0);
 	});
 
 	it("rebuilds the Telegram runtime after saving app config", async () => {

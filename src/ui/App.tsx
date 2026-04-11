@@ -256,6 +256,7 @@ function App() {
   useEffect(() => {
     if (connected && configState && !configState.requiresOnboarding) {
       sendEvent({ type: "session.list" });
+      sendEvent({ type: "agent.active.get" });
     }
   }, [connected, configState, sendEvent]);
 
@@ -325,9 +326,6 @@ function App() {
         ? null
         : `${nextConfigState.config.connectionType === "anthropic-compatible" ? "Anthropic" : "OpenAI"}-compatible mode is active. Letta will register a BYOK provider on your local Letta server before starting the session.`,
     );
-    if (!nextConfigState.requiresOnboarding) {
-      sendEvent({ type: "session.list" });
-    }
   }, [sendEvent]);
 
   useEffect(() => {
@@ -460,6 +458,10 @@ function App() {
         onDeleteSession={handleDeleteSession}
         onOpenSettings={handleOpenSettings}
         onOpenDiagnostics={handleOpenDiagnostics}
+        onAgentSwitch={(agentKey) => sendEvent({ type: "agent.switch", payload: { agentKey } })}
+        onAgentCreate={(name) => sendEvent({ type: "agent.create", payload: name ? { name } : {} })}
+        onAgentRename={(agentKey, name) => sendEvent({ type: "agent.rename", payload: { agentKey, name } })}
+        onAgentDelete={(agentKey) => sendEvent({ type: "agent.delete", payload: { agentKey } })}
         activeView={activeView}
       />
 

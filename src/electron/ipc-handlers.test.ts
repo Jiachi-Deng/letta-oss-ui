@@ -1,4 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const electronAppState = vi.hoisted(() => ({
+	userDataPath: "/tmp/letta-desktop-test",
+}));
 
 const sendMock = vi.hoisted(() => vi.fn());
 const runLettaMock = vi.hoisted(() => vi.fn());
@@ -17,7 +24,10 @@ const finishCodeIslandObservationMock = vi.hoisted(() => vi.fn());
 vi.mock("electron", () => ({
 	app: {
 		isPackaged: false,
-		getPath: vi.fn(() => "/tmp/letta-desktop-test"),
+		getPath: vi.fn((name: string) => {
+			if (name === "userData") return electronAppState.userDataPath;
+			return "/tmp/letta-desktop-test";
+		}),
 	},
 	BrowserWindow: {
 		getAllWindows: () => [
@@ -53,6 +63,7 @@ vi.mock("./libs/codeisland-observer.js", () => ({
 
 describe("handleClientEvent", () => {
 	beforeEach(async () => {
+		electronAppState.userDataPath = mkdtempSync(join(tmpdir(), "letta-ipc-handlers-"));
 		vi.resetModules();
 		vi.clearAllMocks();
 		getSessionProjectionMock.mockReturnValue(undefined);
@@ -72,6 +83,10 @@ describe("handleClientEvent", () => {
 		bindResidentCoreService(
 			new ResidentCoreService(residentCoreBroadcast, mockSessionOwner as never),
 		);
+	});
+
+	afterEach(() => {
+		rmSync(electronAppState.userDataPath, { recursive: true, force: true });
 	});
 
 	it("broadcasts runner.error when session start fails", async () => {

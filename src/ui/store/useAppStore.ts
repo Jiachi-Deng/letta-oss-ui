@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ServerEvent, SessionStatus, StreamMessage } from "../types";
+import type { AgentRecord, AgentRegistryEntry, ServerEvent, SessionStatus, StreamMessage } from "../types";
 
 export type PermissionRequest = {
   toolUseId: string;
@@ -23,6 +23,11 @@ export type SessionView = {
 interface AppState {
   sessions: Record<string, SessionView>;
   activeSessionId: string | null;
+  activeAgentKey: string | null;
+  activeAgent: AgentRecord | null;
+  knownAgents: AgentRegistryEntry[];
+  agentSwitchError: string | null;
+  agentMutationError: string | null;
   prompt: string;
   cwd: string;
   pendingStart: boolean;
@@ -93,9 +98,24 @@ function shouldPreserveLocalSession(session: SessionView, activeSessionId: strin
   return false;
 }
 
+function cloneAgentEntries(entries: AgentRegistryEntry[]): AgentRegistryEntry[] {
+  return entries.map((entry) => ({
+    key: entry.key,
+    record: {
+      ...entry.record,
+      ...(entry.record.channels ? { channels: { ...entry.record.channels } } : {}),
+    },
+  }));
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   sessions: {},
   activeSessionId: null,
+  activeAgentKey: null,
+  activeAgent: null,
+  knownAgents: [],
+  agentSwitchError: null,
+  agentMutationError: null,
   prompt: "",
   cwd: "",
   pendingStart: false,
@@ -253,6 +273,51 @@ export const useAppStore = create<AppState>((set, get) => ({
           );
           get().setActiveSessionId(remaining[0]?.id ?? null);
         }
+        break;
+      }
+
+      case "agent.active": {
+        set({
+          activeAgentKey: event.payload.activeAgentKey,
+          activeAgent: event.payload.agent,
+          knownAgents: cloneAgentEntries(event.payload.agents),
+          agentSwitchError: null,
+          agentMutationError: null,
+        });
+        break;
+      }
+
+      case "agent.list": {
+        set({
+          activeAgentKey: event.payload.activeAgentKey,
+          knownAgents: cloneAgentEntries(event.payload.agents),
+          agentSwitchError: null,
+          agentMutationError: null,
+        });
+        break;
+      }
+
+      case "agent.switch.result": {
+        set({
+          activeAgentKey: event.payload.activeAgentKey,
+          activeAgent: event.payload.agent,
+          knownAgents: cloneAgentEntries(event.payload.agents),
+          agentSwitchError: event.payload.success ? null : (event.payload.error ?? "Could not switch agents."),
+          agentMutationError: null,
+        });
+        break;
+      }
+
+      case "agent.create.result":
+      case "agent.rename.result":
+      case "agent.delete.result": {
+        set({
+          activeAgentKey: event.payload.activeAgentKey,
+          activeAgent: event.payload.agent,
+          knownAgents: cloneAgentEntries(event.payload.agents),
+          agentSwitchError: null,
+          agentMutationError: event.payload.success ? null : (event.payload.error ?? "Could not update agents."),
+        });
         break;
       }
 
