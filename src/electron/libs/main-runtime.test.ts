@@ -16,12 +16,6 @@ const getResidentCoreLettaBotRuntimeConfigMock = vi.hoisted(() => vi.fn(() => ({
 			workingDir: "/tmp/letta-desktop-test/lettabot",
 		},
 	},
-	telegram: {
-		token: "telegram-token",
-		dmPolicy: "open",
-		streaming: true,
-		workingDir: "/tmp/letta-desktop-test/lettabot",
-	},
 })));
 
 vi.mock("electron", () => ({
@@ -64,7 +58,7 @@ describe("main-runtime resident core wiring", () => {
 		resetDiagnosticsForTests();
 	});
 
-	it("passes Telegram runtime config into the Resident Core LettaBot host", async () => {
+	it("passes channels runtime config into the Resident Core LettaBot host", async () => {
 		const backend = {
 			warmSession: vi.fn(async () => undefined),
 			invalidateSession: vi.fn(),
@@ -106,7 +100,7 @@ describe("main-runtime resident core wiring", () => {
 		expect(host.start).toHaveBeenCalledTimes(1);
 	});
 
-	it("threads a server event sink through Resident Core Telegram runtime bundles", async () => {
+	it("threads a server event sink through Resident Core channels runtime bundles", async () => {
 		const backend = {
 			warmSession: vi.fn(async () => undefined),
 			invalidateSession: vi.fn(),
@@ -126,8 +120,8 @@ describe("main-runtime resident core wiring", () => {
 		createResidentCoreSessionBackendMock.mockReturnValue(backend);
 		createResidentCoreLettaBotHostMock.mockReturnValue(host);
 
-		const { createResidentCoreTelegramRuntimeBundle } = await import("./main-runtime.js");
-		const bundle = createResidentCoreTelegramRuntimeBundle({} as never, onServerEvent);
+		const { createResidentCoreChannelsRuntimeBundle } = await import("./main-runtime.js");
+		const bundle = createResidentCoreChannelsRuntimeBundle({} as never, onServerEvent);
 
 		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledWith(expect.objectContaining({
 			onServerEvent,
@@ -139,11 +133,10 @@ describe("main-runtime resident core wiring", () => {
 		expect(bundle.lettabotHost).toBe(host);
 	});
 
-	it("no-ops Telegram startup when the runtime config is absent", async () => {
+	it("no-ops channels startup when the runtime config is absent", async () => {
 		getResidentCoreLettaBotRuntimeConfigMock.mockReturnValue({
 			workingDir: "/tmp/letta-desktop-test/lettabot",
 			channels: {},
-			telegram: null,
 		});
 		const host = {
 			start: vi.fn(async () => undefined),
@@ -164,7 +157,7 @@ describe("main-runtime resident core wiring", () => {
 		expect(host.start).toHaveBeenCalledTimes(1);
 	});
 
-	it("records a diagnostic failure when Telegram runtime startup rejects", async () => {
+	it("records a diagnostic failure when channels runtime startup rejects", async () => {
 		const host = {
 			start: vi.fn(async () => {
 				throw new Error("telegram host start failed");

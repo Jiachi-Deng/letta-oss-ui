@@ -10,7 +10,7 @@
 - Resident Core wiring
 - startup orchestration
 - packaged app assembly
-- Telegram 设置保存和热重载接线
+- channels runtime 设置保存和热重载接线（Telegram 是当前第一个实现）
 
 ## Other repos
 

@@ -92,24 +92,38 @@ function normalizeResidentCoreChannelsConfig(channels?: ResidentCoreChannelsConf
 	};
 }
 
+function getConfiguredChannelNames(channels: ResidentCoreChannelsConfig | null): string[] {
+	if (!channels) return [];
+	return Object.entries(channels)
+		.filter(([, config]) => Boolean(config))
+		.map(([name]) => name);
+}
+
+function getChannelsWorkingDirOverride(channels: ResidentCoreChannelsConfig): string | undefined {
+	return channels.telegram?.workingDir;
+}
+
+function createAgentChannelsConfig(channels: ResidentCoreChannelsConfig): AgentConfig["channels"] {
+	const agentChannels: AgentConfig["channels"] = {};
+	if (channels.telegram) {
+		agentChannels.telegram = {
+			enabled: true,
+			token: channels.telegram.token!,
+			dmPolicy: channels.telegram.dmPolicy ?? "open",
+			streaming: channels.telegram.streaming ?? true,
+		};
+	}
+	return agentChannels;
+}
+
 function createResidentCoreAgentConfig(
 	botConfig: BotConfig,
 	channels: ResidentCoreChannelsConfig,
 ): AgentConfig {
-	const telegram = channels.telegram;
 	return {
 		name: botConfig.agentName ?? "ResidentCoreLettaBot",
 		workingDir: botConfig.workingDir,
-		channels: telegram
-			? {
-				telegram: {
-					enabled: true,
-					token: telegram.token!,
-					dmPolicy: telegram.dmPolicy ?? "open",
-					streaming: telegram.streaming ?? true,
-				},
-			}
-			: {},
+		channels: createAgentChannelsConfig(channels),
 		conversations: {
 			mode: botConfig.conversationMode,
 			reuseSession: botConfig.reuseSession,
@@ -161,7 +175,7 @@ export class ResidentCoreLettaBotHost {
 	async start(): Promise<void> {
 		if (this.started) return;
 		const channels = normalizeResidentCoreChannelsConfig(this.options.channels);
-		const telegram = channels?.telegram ?? null;
+		const configuredChannelNames = getConfiguredChannelNames(channels);
 		log({
 			level: "info",
 			decision_id: "LETTABOT_HOST_START_001",
@@ -170,11 +184,11 @@ export class ResidentCoreLettaBotHost {
 				channels: summarizeResidentCoreChannelsConfig(channels),
 			},
 		});
-		if (!telegram) {
+		if (configuredChannelNames.length === 0) {
 			log({
 				level: "info",
 				decision_id: "LETTABOT_HOST_START_001",
-				message: "Resident Core LettaBot host idle: Telegram is not configured",
+				message: "Resident Core LettaBot host idle: no channels configured",
 			});
 			return;
 		}
@@ -187,13 +201,14 @@ export class ResidentCoreLettaBotHost {
 			const botConfig = this.options.config ?? createDefaultBotConfig(resolve(app.getPath("userData")));
 			const runtimeBotConfig: BotConfig = {
 				...botConfig,
-				workingDir: telegram.workingDir || botConfig.workingDir,
+				workingDir: getChannelsWorkingDirOverride(channels ?? {}) || botConfig.workingDir,
 			};
 			log({
 				level: "info",
 				message: "Resident Core LettaBot creating LettaBot",
 				data: {
-					telegram: summarizeTelegramConfig(telegram),
+					channels: summarizeResidentCoreChannelsConfig(channels),
+					configuredChannelNames,
 					workingDir: runtimeBotConfig.workingDir,
 					hasCustomBotFactory: Boolean(this.options.createBot),
 				},
@@ -245,7 +260,7 @@ export class ResidentCoreLettaBotHost {
 				level: "error",
 				decision_id: "LETTABOT_HOST_START_003",
 				error_code: "E_TELEGRAM_HOST_START_FAILED",
-				message: "Resident Core LettaBot Telegram startup failed",
+				message: "Resident Core LettaBot channels startup failed",
 				data: serializeError(error),
 			});
 			throw error;

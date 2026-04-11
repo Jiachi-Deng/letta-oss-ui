@@ -89,4 +89,36 @@ describe("resident core config normalization", () => {
 			},
 		});
 	});
+
+	it("returns resident core runtime config from the channels container", async () => {
+		writeConfigFile({
+			connectionType: "letta-server",
+			LETTA_BASE_URL: "https://api.letta.com",
+			residentCore: {
+				channels: {
+					telegram: {
+						token: "runtime-token",
+						dmPolicy: "open",
+						streaming: true,
+						workingDir: "/tmp/runtime",
+					},
+				},
+			},
+		});
+
+		const { initializeAppConfig, getResidentCoreLettaBotRuntimeConfig } = await import("./config.js");
+		initializeAppConfig({ packaged: true, userDataPath });
+
+		expect(getResidentCoreLettaBotRuntimeConfig()).toEqual({
+			workingDir: "/tmp/runtime",
+			channels: {
+				telegram: {
+					token: "runtime-token",
+					dmPolicy: "open",
+					streaming: true,
+					workingDir: "/tmp/runtime",
+				},
+			},
+		});
+	});
 });

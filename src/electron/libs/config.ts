@@ -50,7 +50,6 @@ export type ResidentCoreConfig = {
 export type ResidentCoreLettaBotRuntimeConfig = {
   workingDir: string;
   channels: ResidentCoreChannelsConfig;
-  telegram: ResidentCoreTelegramStartupConfig | null;
 };
 
 export type AppConfigLoadResult = {
@@ -505,6 +504,5 @@ export function getResidentCoreLettaBotRuntimeConfig(): ResidentCoreLettaBotRunt
   return {
     workingDir: telegram?.workingDir ?? join(app.getPath("userData"), "lettabot"),
     channels: telegram ? { telegram } : {},
-    telegram: telegram ?? null,
   };
 }

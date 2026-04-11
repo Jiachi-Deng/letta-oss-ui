@@ -27,8 +27,8 @@ import {
     stopElectronDevelopmentServer,
     stopElectronRuntimeServices,
     startElectronRuntimeServices,
+    createResidentCoreChannelsRuntimeBundle,
 } from "./libs/main-runtime.js";
-import { createResidentCoreTelegramRuntimeBundle } from "./libs/main-runtime.js";
 import { createResidentCoreService } from "./libs/resident-core/resident-core.js";
 import { createResidentCoreSessionBackend } from "./libs/resident-core/resident-core-session-backend.js";
 import { createResidentCoreSessionOwner } from "./libs/resident-core/session-owner.js";
@@ -63,7 +63,7 @@ function maskTelegramToken(token?: string | null): string | null {
 function summarizeResidentCoreLettaBotRuntimeConfig(
     config: ResidentCoreLettaBotRuntimeConfig,
 ): Record<string, unknown> {
-    const telegram = config.telegram;
+    const telegram = config.channels.telegram ?? null;
     return {
         workingDir: config.workingDir,
         hasToken: Boolean(telegram?.token?.trim()),
@@ -93,7 +93,7 @@ async function cleanupRuntime(): Promise<void> {
     return cleanupPromise;
 }
 
-async function reloadResidentCoreTelegramRuntime(): Promise<void> {
+async function reloadResidentCoreChannelsRuntime(): Promise<void> {
     if (!residentCoreSessionOwner || !residentCoreService) {
         throw new Error("Resident Core is not initialized");
     }
@@ -106,11 +106,11 @@ async function reloadResidentCoreTelegramRuntime(): Promise<void> {
     mainLog({
         level: "info",
         decision_id: TG_RUNTIME_RELOAD_001,
-        message: "resident core telegram runtime reload requested",
+        message: "resident core channels runtime reload requested",
         data: summarizeResidentCoreLettaBotRuntimeConfig(nextRuntimeConfig),
     });
 
-    const nextRuntime = createResidentCoreTelegramRuntimeBundle(
+    const nextRuntime = createResidentCoreChannelsRuntimeBundle(
         residentCoreSessionOwner,
         residentCoreService.ingestServerEvent.bind(residentCoreService),
     );
@@ -122,7 +122,7 @@ async function reloadResidentCoreTelegramRuntime(): Promise<void> {
             level: "error",
             decision_id: TG_RUNTIME_RELOAD_004,
             error_code: E_TELEGRAM_RUNTIME_RELOAD_FAILED,
-            message: "resident core telegram runtime reload failed",
+            message: "resident core channels runtime reload failed",
             data: {
                 error: error instanceof Error ? error.message : String(error),
                 stack: error instanceof Error ? error.stack : undefined,
@@ -134,10 +134,10 @@ async function reloadResidentCoreTelegramRuntime(): Promise<void> {
     mainLog({
         level: "info",
         decision_id: TG_RUNTIME_RELOAD_002,
-        message: "resident core telegram runtime restart succeeded",
+        message: "resident core channels runtime restart succeeded",
         data: {
             nextWorkingDir: nextRuntime.runtimeConfig.workingDir,
-            hasTelegramToken: Boolean(nextRuntime.runtimeConfig.telegram?.token?.trim()),
+            hasTelegramToken: Boolean(nextRuntime.runtimeConfig.channels.telegram?.token?.trim()),
         },
     });
 
@@ -154,7 +154,7 @@ async function reloadResidentCoreTelegramRuntime(): Promise<void> {
     mainLog({
         level: "info",
         decision_id: TG_RUNTIME_RELOAD_003,
-        message: "resident core telegram runtime reload completed",
+        message: "resident core channels runtime reload completed",
         data: {
             previousBackendConfigured: Boolean(previousBackend),
             nextWorkingDir: nextRuntime.runtimeConfig.workingDir,
@@ -230,7 +230,7 @@ app.on("ready", () => {
     const lettabotRuntimeConfig = getResidentCoreLettaBotRuntimeConfig();
     mainLog({
         level: "info",
-        message: "resident core telegram runtime config read",
+        message: "resident core channels runtime config read",
         data: summarizeResidentCoreLettaBotRuntimeConfig(lettabotRuntimeConfig),
     });
     const lettabotWorkingDir = lettabotRuntimeConfig.workingDir;
@@ -281,7 +281,7 @@ app.on("ready", () => {
 
     ipcMainHandle("save-app-config", async (_event, config) => {
         const nextState = saveAppConfig(config);
-        await reloadResidentCoreTelegramRuntime();
+        await reloadResidentCoreChannelsRuntime();
         return nextState;
     });
 

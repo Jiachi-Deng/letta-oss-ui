@@ -23,7 +23,7 @@ const ipcMainHandleMock = vi.hoisted(() => vi.fn((key: string, handler: Function
 }));
 const lettabotHostStopMock = vi.hoisted(() => vi.fn());
 const saveAppConfigMock = vi.hoisted(() => vi.fn());
-const createResidentCoreTelegramRuntimeBundleMock = vi.hoisted(() => vi.fn());
+const createResidentCoreChannelsRuntimeBundleMock = vi.hoisted(() => vi.fn());
 const recordDiagnosticEventMock = vi.hoisted(() => vi.fn());
 const bindResidentCoreServiceMock = vi.hoisted(() => vi.fn());
 const residentCoreServiceCleanupMock = vi.hoisted(() => vi.fn());
@@ -104,7 +104,7 @@ vi.mock("./libs/main-runtime.js", () => ({
 	startElectronRuntimeServices: startElectronRuntimeServicesMock,
 	stopElectronRuntimeServices: stopElectronRuntimeServicesMock,
 	stopElectronDevelopmentServer: stopElectronDevelopmentServerMock,
-	createResidentCoreTelegramRuntimeBundle: createResidentCoreTelegramRuntimeBundleMock,
+	createResidentCoreChannelsRuntimeBundle: createResidentCoreChannelsRuntimeBundleMock,
 }));
 
 vi.mock("./ipc-handlers.js", () => ({
@@ -147,7 +147,7 @@ vi.mock("./libs/config.js", () => ({
 	saveAppConfig: saveAppConfigMock,
 	getResidentCoreLettaBotRuntimeConfig: vi.fn(() => ({
 		workingDir: "/tmp/letta-desktop-test/lettabot",
-		telegram: null,
+		channels: {},
 	})),
 }));
 
@@ -270,7 +270,7 @@ describe("main lifecycle", () => {
 		expect(app.exit).toHaveBeenCalledWith(0);
 	});
 
-	it("rebuilds the Telegram runtime after saving app config", async () => {
+	it("rebuilds the channels runtime after saving app config", async () => {
 		await bootstrapMain();
 		createResidentCoreSessionBackendMock.mockReturnValue({
 			warmSession: vi.fn(async () => undefined),
@@ -292,7 +292,7 @@ describe("main lifecycle", () => {
 			runSession: vi.fn(),
 			syncTodoToolCall: vi.fn(),
 		};
-		createResidentCoreTelegramRuntimeBundleMock.mockReturnValue({
+		createResidentCoreChannelsRuntimeBundleMock.mockReturnValue({
 			backend: nextBackend,
 			lettabotHost: {
 				start: nextHostStartMock,
@@ -302,11 +302,13 @@ describe("main lifecycle", () => {
 			},
 			runtimeConfig: {
 				workingDir: "/tmp/letta-desktop-test/lettabot-next",
-				telegram: {
-					token: "next-token",
-					dmPolicy: "pairing",
-					streaming: false,
-					workingDir: "/tmp/letta-desktop-test/lettabot-next",
+				channels: {
+					telegram: {
+						token: "next-token",
+						dmPolicy: "pairing",
+						streaming: false,
+						workingDir: "/tmp/letta-desktop-test/lettabot-next",
+					},
 				},
 			},
 		});
@@ -353,14 +355,14 @@ describe("main lifecycle", () => {
 		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledWith(expect.objectContaining({
 			onServerEvent: expect.any(Function),
 		}));
-		expect(createResidentCoreTelegramRuntimeBundleMock).toHaveBeenCalledWith(
+		expect(createResidentCoreChannelsRuntimeBundleMock).toHaveBeenCalledWith(
 			expect.anything(),
 			expect.any(Function),
 		);
 		expect(nextHostStartMock.mock.invocationCallOrder[0]).toBeLessThan(lettabotHostStopMock.mock.invocationCallOrder[0]);
 		expect(lettabotHostStopMock).toHaveBeenCalledTimes(1);
 		expect(residentCoreServiceCleanupMock).toHaveBeenCalledTimes(1);
-		expect(createResidentCoreTelegramRuntimeBundleMock).toHaveBeenCalledTimes(1);
+		expect(createResidentCoreChannelsRuntimeBundleMock).toHaveBeenCalledTimes(1);
 		expect(nextHostStartMock).toHaveBeenCalledTimes(1);
 		expect(nextHostStopMock).not.toHaveBeenCalled();
 		expect(recordDiagnosticEventMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -368,7 +370,7 @@ describe("main lifecycle", () => {
 		}));
 	});
 
-	it("throws when the Telegram runtime fails to restart after saving app config", async () => {
+	it("throws when the channels runtime fails to restart after saving app config", async () => {
 		await bootstrapMain();
 		createResidentCoreSessionBackendMock.mockReturnValue({
 			warmSession: vi.fn(async () => undefined),
@@ -382,7 +384,7 @@ describe("main lifecycle", () => {
 		const failingHostStartMock = vi.fn(async () => {
 			throw new Error("telegram restart failed");
 		});
-		createResidentCoreTelegramRuntimeBundleMock.mockReturnValue({
+		createResidentCoreChannelsRuntimeBundleMock.mockReturnValue({
 			backend: {
 				warmSession: vi.fn(async () => undefined),
 				invalidateSession: vi.fn(),
@@ -400,11 +402,13 @@ describe("main lifecycle", () => {
 			},
 			runtimeConfig: {
 				workingDir: "/tmp/letta-desktop-test/lettabot-next",
-				telegram: {
-					token: "next-token",
-					dmPolicy: "pairing",
-					streaming: false,
-					workingDir: "/tmp/letta-desktop-test/lettabot-next",
+				channels: {
+					telegram: {
+						token: "next-token",
+						dmPolicy: "pairing",
+						streaming: false,
+						workingDir: "/tmp/letta-desktop-test/lettabot-next",
+					},
 				},
 			},
 		});
@@ -451,7 +455,7 @@ describe("main lifecycle", () => {
 		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledWith(expect.objectContaining({
 			onServerEvent: expect.any(Function),
 		}));
-		expect(createResidentCoreTelegramRuntimeBundleMock).toHaveBeenCalledWith(
+		expect(createResidentCoreChannelsRuntimeBundleMock).toHaveBeenCalledWith(
 			expect.anything(),
 			expect.any(Function),
 		);

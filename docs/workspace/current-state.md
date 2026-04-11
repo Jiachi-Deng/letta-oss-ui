@@ -13,7 +13,7 @@
 - Resident Core wiring
 - Letta server startup glue
 - CodeIsland startup glue
-- Telegram 设置保存和热重载接线
+- channels runtime 设置保存和热重载接线（Telegram 是当前第一个实现）
 
 ## Current surrounding repos
 
@@ -33,7 +33,7 @@
 - desktop chat works on current Resident Core path
 - Telegram chat works through Resident Core + vendored lettabot
 - CodeIsland dev launch works
-- Telegram settings save + hot reload works with rollback-safe Telegram runtime swaps
+- channels runtime settings save + hot reload works with rollback-safe runtime swaps
 - desktop session.start no longer advertises a fake `allowedTools` contract; real desktop policy is still pending
 - Resident Core bot/Telegram traces now flow into the shared projection store and control-plane broadcasts
 - `app/letta-desktop` full vitest suite passes

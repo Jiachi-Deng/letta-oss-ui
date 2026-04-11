@@ -13,7 +13,7 @@
 1. `app/letta-desktop`
    - desktop UI / 设置 / 诊断 / 打包
 2. `Resident Core`
-   - 持有 session / runtime / Telegram host
+   - 持有 session / runtime / channels host
 3. `vendor/letta-monorepo`
    - Letta Python server
 4. `vendor/letta-code` + `vendor/letta-code-sdk`
@@ -41,7 +41,7 @@
 - Resident Core wiring
 - bundled Letta server startup
 - bundled CodeIsland startup
-- Telegram 设置保存和热重载接线
+- channels runtime 设置保存和热重载接线（Telegram 是当前第一个实现）
 
 大多数产品行为问题，先从这里开始看。
 
@@ -119,7 +119,7 @@ bun run release:check
 - 优先使用 desktop 设置页里保存的配置
 - env 仅用于开发 fallback
 
-保存设置后，Telegram host 会热重载，不必重启整个 app。
+保存设置后，channels host 会热重载，不必重启整个 app。
 
 ## 8. 推荐继续阅读
 

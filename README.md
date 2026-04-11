@@ -12,7 +12,7 @@
 - Resident Core wiring
 - bundled Letta server startup
 - bundled CodeIsland startup
-- Telegram 配置保存和热重载接线
+- channels runtime 配置保存和热重载接线
 
 ## Local architecture
 

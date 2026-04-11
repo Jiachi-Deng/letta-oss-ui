@@ -23,7 +23,7 @@ describe("ResidentCoreLettaBotHost", () => {
 		vi.clearAllMocks();
 	});
 
-	it("starts Telegram channels against the Resident Core backend when Telegram is configured", async () => {
+	it("starts configured channels against the Resident Core backend", async () => {
 		const backend = {
 			warmSession: vi.fn(async () => undefined),
 			invalidateSession: vi.fn(),
@@ -97,7 +97,7 @@ describe("ResidentCoreLettaBotHost", () => {
 		expect(host.getBot()).toBe(bot);
 	});
 
-	it("no-ops cleanly when Telegram is not configured", async () => {
+	it("no-ops cleanly when no channels are configured", async () => {
 		const backend = {
 			warmSession: vi.fn(async () => undefined),
 			invalidateSession: vi.fn(),
@@ -120,9 +120,7 @@ describe("ResidentCoreLettaBotHost", () => {
 				reuseSession: true,
 				agentName: "ResidentCoreLettaBot",
 			},
-			channels: {
-				telegram: null,
-			},
+			channels: {},
 			createBot: createBot as never,
 		});
 
