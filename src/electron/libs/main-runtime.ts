@@ -20,6 +20,7 @@ import type { ResidentCoreLettaBotRuntimeConfig, ResidentCoreTelegramStartupConf
 import { createComponentLogger, createTraceContext, createTurnId } from "./trace.js";
 import { join } from "node:path";
 import { createResidentCoreSessionBackend } from "./resident-core/resident-core-session-backend.js";
+import type { ResidentCoreSessionBackendEventSink } from "./resident-core/resident-core-session-backend.js";
 import type { ResidentCoreSessionOwner } from "./resident-core/session-owner.js";
 import {
   TG_RUNTIME_START_001,
@@ -127,12 +128,14 @@ export function bootstrapElectronRuntime(): void {
 
 export function createResidentCoreChannelsRuntimeBundle(
   sessionOwner: ResidentCoreSessionOwner,
+  onServerEvent?: ResidentCoreSessionBackendEventSink,
 ): ResidentCoreChannelsRuntimeBundle {
   const runtimeConfig = getResidentCoreLettaBotRuntimeConfig();
   const botConfig = createResidentCoreLettaBotConfig(runtimeConfig);
   const backend = createResidentCoreSessionBackend({
     owner: sessionOwner,
     config: botConfig,
+    onServerEvent,
   });
   const lettabotHost = createResidentCoreLettaBotHost({
     config: botConfig,

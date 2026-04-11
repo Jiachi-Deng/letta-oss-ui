@@ -29,6 +29,7 @@ const bindResidentCoreServiceMock = vi.hoisted(() => vi.fn());
 const residentCoreServiceCleanupMock = vi.hoisted(() => vi.fn());
 const createResidentCoreServiceMock = vi.hoisted(() => vi.fn(() => ({
 	handleClientEvent: vi.fn(async () => undefined),
+	ingestServerEvent: vi.fn(),
 	cleanupAllSessions: residentCoreServiceCleanupMock,
 })));
 const createResidentCoreSessionOwnerMock = vi.hoisted(() => vi.fn(() => ({})));
@@ -207,6 +208,9 @@ describe("main lifecycle", () => {
 		getHandler("ready")();
 
 		expect(startElectronRuntimeServicesMock).toHaveBeenCalledTimes(1);
+		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledWith(expect.objectContaining({
+			onServerEvent: expect.any(Function),
+		}));
 		expect(windows).toHaveLength(1);
 
 		const preventDefault = vi.fn();
@@ -268,6 +272,15 @@ describe("main lifecycle", () => {
 
 	it("rebuilds the Telegram runtime after saving app config", async () => {
 		await bootstrapMain();
+		createResidentCoreSessionBackendMock.mockReturnValue({
+			warmSession: vi.fn(async () => undefined),
+			invalidateSession: vi.fn(),
+			getSession: vi.fn(),
+			ensureSessionForKey: vi.fn(),
+			persistSessionState: vi.fn(),
+			runSession: vi.fn(),
+			syncTodoToolCall: vi.fn(),
+		});
 		const nextHostStartMock = vi.fn(async () => undefined);
 		const nextHostStopMock = vi.fn();
 		const nextBackend = {
@@ -337,6 +350,14 @@ describe("main lifecycle", () => {
 		});
 
 		expect(saveAppConfigMock).toHaveBeenCalledTimes(1);
+		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledWith(expect.objectContaining({
+			onServerEvent: expect.any(Function),
+		}));
+		expect(createResidentCoreTelegramRuntimeBundleMock).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.any(Function),
+		);
+		expect(nextHostStartMock.mock.invocationCallOrder[0]).toBeLessThan(lettabotHostStopMock.mock.invocationCallOrder[0]);
 		expect(lettabotHostStopMock).toHaveBeenCalledTimes(1);
 		expect(residentCoreServiceCleanupMock).toHaveBeenCalledTimes(1);
 		expect(createResidentCoreTelegramRuntimeBundleMock).toHaveBeenCalledTimes(1);
@@ -349,6 +370,15 @@ describe("main lifecycle", () => {
 
 	it("throws when the Telegram runtime fails to restart after saving app config", async () => {
 		await bootstrapMain();
+		createResidentCoreSessionBackendMock.mockReturnValue({
+			warmSession: vi.fn(async () => undefined),
+			invalidateSession: vi.fn(),
+			getSession: vi.fn(),
+			ensureSessionForKey: vi.fn(),
+			persistSessionState: vi.fn(),
+			runSession: vi.fn(),
+			syncTodoToolCall: vi.fn(),
+		});
 		const failingHostStartMock = vi.fn(async () => {
 			throw new Error("telegram restart failed");
 		});
@@ -418,8 +448,15 @@ describe("main lifecycle", () => {
 		})).rejects.toThrow("telegram restart failed");
 
 		expect(saveAppConfigMock).toHaveBeenCalledTimes(1);
-		expect(lettabotHostStopMock).toHaveBeenCalledTimes(1);
-		expect(residentCoreServiceCleanupMock).toHaveBeenCalledTimes(1);
+		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledWith(expect.objectContaining({
+			onServerEvent: expect.any(Function),
+		}));
+		expect(createResidentCoreTelegramRuntimeBundleMock).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.any(Function),
+		);
+		expect(lettabotHostStopMock).not.toHaveBeenCalled();
+		expect(residentCoreServiceCleanupMock).not.toHaveBeenCalled();
 		expect(failingHostStartMock).toHaveBeenCalledTimes(1);
 		expect(recordDiagnosticEventMock).toHaveBeenCalledWith(expect.objectContaining({
 			decision_id: "TG_RUNTIME_RELOAD_004",

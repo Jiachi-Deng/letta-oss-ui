@@ -105,6 +105,10 @@ export class ResidentCoreService {
     private readonly sessionOwner: ResidentCoreSessionOwner,
   ) {}
 
+  ingestServerEvent(event: ServerEvent): void {
+    this.emit(event);
+  }
+
   private emit(event: ServerEvent): void {
     if (event.type === "session.status") {
       const existing = this.sessionStore.get(event.payload.sessionId);
@@ -166,13 +170,22 @@ export class ResidentCoreService {
   }
 
   private async handleAgentSwitch(agentKey: string): Promise<void> {
-    const switched = this.sessionOwner.switchActiveAgent(agentKey);
+    const normalizedAgentKey = agentKey.trim();
+    const activeAgentKey = this.sessionOwner.getActiveAgentKey();
+    const knownAgent = this.sessionOwner.listKnownAgents().some((agent) => agent.key === normalizedAgentKey);
+    const switched = normalizedAgentKey === activeAgentKey
+      ? true
+      : this.sessionOwner.switchActiveAgent(normalizedAgentKey);
     this.emit({
       type: "agent.switch.result",
       payload: toAgentActivePayload(
         this.sessionOwner,
         switched,
-        switched ? undefined : `Unknown agent key: ${agentKey}`,
+        switched || normalizedAgentKey === activeAgentKey
+          ? undefined
+          : knownAgent
+            ? `Agent ${normalizedAgentKey} is already active.`
+            : `Unknown agent key: ${normalizedAgentKey}`,
       ),
     });
   }

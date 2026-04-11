@@ -110,27 +110,13 @@ async function reloadResidentCoreTelegramRuntime(): Promise<void> {
         data: summarizeResidentCoreLettaBotRuntimeConfig(nextRuntimeConfig),
     });
 
-    if (previousHost) {
-        await previousHost.stop();
-    }
-
-    await residentCoreService.cleanupAllSessions();
-    lettabotHost = null;
-    lettabotBackend = null;
-
-    const nextRuntime = createResidentCoreTelegramRuntimeBundle(residentCoreSessionOwner);
+    const nextRuntime = createResidentCoreTelegramRuntimeBundle(
+        residentCoreSessionOwner,
+        residentCoreService.ingestServerEvent.bind(residentCoreService),
+    );
 
     try {
         await nextRuntime.lettabotHost.start();
-        mainLog({
-            level: "info",
-            decision_id: TG_RUNTIME_RELOAD_002,
-            message: "resident core telegram runtime restart succeeded",
-            data: {
-                nextWorkingDir: nextRuntime.runtimeConfig.workingDir,
-                hasTelegramToken: Boolean(nextRuntime.runtimeConfig.telegram?.token?.trim()),
-            },
-        });
     } catch (error) {
         mainLog({
             level: "error",
@@ -145,9 +131,25 @@ async function reloadResidentCoreTelegramRuntime(): Promise<void> {
         throw error;
     }
 
+    mainLog({
+        level: "info",
+        decision_id: TG_RUNTIME_RELOAD_002,
+        message: "resident core telegram runtime restart succeeded",
+        data: {
+            nextWorkingDir: nextRuntime.runtimeConfig.workingDir,
+            hasTelegramToken: Boolean(nextRuntime.runtimeConfig.telegram?.token?.trim()),
+        },
+    });
+
     lettabotBackend = nextRuntime.backend;
     lettabotHost = nextRuntime.lettabotHost;
     codeIslandMonitor = currentCodeIslandMonitor;
+
+    if (previousHost) {
+        await previousHost.stop();
+    }
+
+    await residentCoreService.cleanupAllSessions();
 
     mainLog({
         level: "info",
@@ -224,6 +226,7 @@ app.on("ready", () => {
     });
     residentCoreService = createResidentCoreService(residentCoreBroadcast, residentCoreSessionOwner);
     bindResidentCoreService(residentCoreService);
+    const residentCoreServerEventSink = residentCoreService.ingestServerEvent.bind(residentCoreService);
     const lettabotRuntimeConfig = getResidentCoreLettaBotRuntimeConfig();
     mainLog({
         level: "info",
@@ -233,6 +236,7 @@ app.on("ready", () => {
     const lettabotWorkingDir = lettabotRuntimeConfig.workingDir;
     lettabotBackend = createResidentCoreSessionBackend({
         owner: residentCoreSessionOwner,
+        onServerEvent: residentCoreServerEventSink,
         config: {
             workingDir: lettabotWorkingDir,
             allowedTools: [],

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDiagnosticsForTests } from "./diagnostics.js";
 
 const createResidentCoreLettaBotHostMock = vi.hoisted(() => vi.fn());
+const createResidentCoreSessionBackendMock = vi.hoisted(() => vi.fn());
 const ensureBundledLettaServerStartedMock = vi.hoisted(() => vi.fn(async () => ({ status: "unsupported" as const })));
 const ensureCodeIslandStartedMock = vi.hoisted(() => vi.fn(() => ({ status: "unsupported" as const })));
 const startCodeIslandMonitorMock = vi.hoisted(() => vi.fn(() => ({ stop: vi.fn() })));
@@ -40,6 +41,10 @@ vi.mock("./bundled-letta-server.js", () => ({
 
 vi.mock("./resident-core/lettabot-host.js", () => ({
 	createResidentCoreLettaBotHost: createResidentCoreLettaBotHostMock,
+}));
+
+vi.mock("./resident-core/resident-core-session-backend.js", () => ({
+	createResidentCoreSessionBackend: createResidentCoreSessionBackendMock,
 }));
 
 vi.mock("./bundled-codeisland.js", () => ({
@@ -99,6 +104,39 @@ describe("main-runtime resident core wiring", () => {
 			}),
 		);
 		expect(host.start).toHaveBeenCalledTimes(1);
+	});
+
+	it("threads a server event sink through Resident Core Telegram runtime bundles", async () => {
+		const backend = {
+			warmSession: vi.fn(async () => undefined),
+			invalidateSession: vi.fn(),
+			getSession: vi.fn(),
+			ensureSessionForKey: vi.fn(),
+			persistSessionState: vi.fn(),
+			runSession: vi.fn(),
+			syncTodoToolCall: vi.fn(),
+		};
+		const host = {
+			start: vi.fn(async () => undefined),
+			stop: vi.fn(),
+			getBot: vi.fn(),
+			getBackend: vi.fn(),
+		};
+		const onServerEvent = vi.fn();
+		createResidentCoreSessionBackendMock.mockReturnValue(backend);
+		createResidentCoreLettaBotHostMock.mockReturnValue(host);
+
+		const { createResidentCoreTelegramRuntimeBundle } = await import("./main-runtime.js");
+		const bundle = createResidentCoreTelegramRuntimeBundle({} as never, onServerEvent);
+
+		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledWith(expect.objectContaining({
+			onServerEvent,
+		}));
+		expect(createResidentCoreLettaBotHostMock).toHaveBeenCalledWith(expect.objectContaining({
+			backend,
+		}));
+		expect(bundle.backend).toBe(backend);
+		expect(bundle.lettabotHost).toBe(host);
 	});
 
 	it("no-ops Telegram startup when the runtime config is absent", async () => {

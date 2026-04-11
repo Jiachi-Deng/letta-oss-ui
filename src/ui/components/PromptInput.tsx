@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef } from "react";
 import type { ClientEvent } from "../types";
 import { useAppStore } from "../store/useAppStore";
 
-const DEFAULT_ALLOWED_TOOLS = "Read,Edit,Bash";
 const MAX_ROWS = 12;
 const LINE_HEIGHT = 21;
 const MAX_HEIGHT = MAX_ROWS * LINE_HEIGHT;
@@ -33,7 +32,7 @@ export function usePromptActions(sendEvent: (event: ClientEvent) => void) {
       // Title will be set from conversation ID
       sendEvent({
         type: "session.start",
-        payload: { title: "", prompt, cwd: cwd.trim() || undefined, allowedTools: DEFAULT_ALLOWED_TOOLS }
+        payload: { title: "", prompt, cwd: cwd.trim() || undefined }
       });
       // Don't clear prompt yet - wait for modal to close to avoid UI flicker
     } else {

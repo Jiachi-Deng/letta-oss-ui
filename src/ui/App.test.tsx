@@ -574,7 +574,6 @@ describe("App", () => {
 				title: "",
 				prompt: "Investigate compatible bootstrap failure",
 				cwd: "/tmp/project",
-				allowedTools: "Read,Edit,Bash",
 			},
 		});
 		await waitFor(() => {
@@ -644,7 +643,6 @@ describe("App", () => {
 					title: "",
 					prompt: "Start a new Letta task",
 					cwd: "/tmp/project",
-					allowedTools: "Read,Edit,Bash",
 				},
 			});
 		});
@@ -698,7 +696,6 @@ describe("App", () => {
 					title: "",
 					prompt: "Kick off the first turn",
 					cwd: "/tmp/project",
-					allowedTools: "Read,Edit,Bash",
 				},
 			});
 		});

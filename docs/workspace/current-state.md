@@ -33,7 +33,9 @@
 - desktop chat works on current Resident Core path
 - Telegram chat works through Resident Core + vendored lettabot
 - CodeIsland dev launch works
-- Telegram settings save + hot reload works
+- Telegram settings save + hot reload works with rollback-safe Telegram runtime swaps
+- desktop session.start no longer advertises a fake `allowedTools` contract; real desktop policy is still pending
+- Resident Core bot/Telegram traces now flow into the shared projection store and control-plane broadcasts
 - `app/letta-desktop` full vitest suite passes
 - `vendor/lettabot` full vitest suite passes
 

@@ -498,6 +498,31 @@ describe("ResidentCoreService", () => {
 		});
 	});
 
+	it("treats switching to the already active agent as a no-op success", async () => {
+		const broadcast = vi.fn();
+		const { createResidentCoreService } = await import("./resident-core.js");
+		const service = createResidentCoreService(broadcast, sessionOwnerMock as never);
+
+		await service.handleClientEvent({
+			type: "agent.switch",
+			payload: {
+				agentKey: "primary",
+			},
+		});
+
+		expect(sessionOwnerMock.switchActiveAgent).not.toHaveBeenCalled();
+		expect(broadcast).toHaveBeenCalledWith({
+			type: "agent.switch.result",
+			payload: expect.objectContaining({
+				success: true,
+				activeAgentKey: "primary",
+				agent: expect.objectContaining({
+					agentId: "agent-primary",
+				}),
+			}),
+		});
+	});
+
 	it("routes session.start and keeps streamed session ids attached to the core projection", async () => {
 		const abortMock = vi.fn(async () => undefined);
 		runLettaMock.mockImplementation(async (options) => {
@@ -767,5 +792,62 @@ describe("ResidentCoreService", () => {
 				type: "runner.error",
 			}),
 		);
+	});
+
+	it("ingests external bot events into the shared session projection path", async () => {
+		const broadcast = vi.fn();
+		const { createResidentCoreService } = await import("./resident-core.js");
+		const { getSessionProjection } = await import("../runtime-state.js");
+		const service = createResidentCoreService(broadcast, sessionOwnerMock as never);
+
+		service.ingestServerEvent({
+			type: "session.status",
+			payload: {
+				sessionId: "conv-bot-1",
+				status: "running",
+				title: "conv-bot-1",
+				cwd: "/tmp/workspace",
+			},
+		});
+		service.ingestServerEvent({
+			type: "stream.user_prompt",
+			payload: {
+				sessionId: "conv-bot-1",
+				prompt: "hello bot",
+			},
+		});
+		service.ingestServerEvent({
+			type: "stream.message",
+			payload: {
+				sessionId: "conv-bot-1",
+				message: { type: "assistant", content: "hi there" } as never,
+			},
+		});
+		service.ingestServerEvent({
+			type: "session.status",
+			payload: {
+				sessionId: "conv-bot-1",
+				status: "completed",
+				title: "conv-bot-1",
+			},
+		});
+
+		expect(getSessionProjection("conv-bot-1")).toMatchObject({
+			conversationId: "conv-bot-1",
+			title: "conv-bot-1",
+			status: "completed",
+			cwd: "/tmp/workspace",
+			messages: [
+				{ type: "user_prompt", prompt: "hello bot" },
+				{ type: "assistant", content: "hi there" },
+			],
+		});
+		expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({
+			type: "session.status",
+			payload: expect.objectContaining({
+				sessionId: "conv-bot-1",
+				status: "completed",
+			}),
+		}));
 	});
 });

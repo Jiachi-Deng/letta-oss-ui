@@ -12,6 +12,7 @@ const ownerMock = vi.hoisted(() => ({
 		stream: async function* () {},
 	})),
 }));
+const serverEventSinkMock = vi.hoisted(() => vi.fn());
 
 vi.mock("electron", () => ({
 	app: {
@@ -56,5 +57,93 @@ describe("ResidentCoreSessionBackend", () => {
 		expect(ownerMock.invalidateBotSession).toHaveBeenCalledWith("conv-test");
 		expect(createSessionMock).not.toHaveBeenCalled();
 		expect(resumeSessionMock).not.toHaveBeenCalled();
+	});
+
+	it("emits shared projection events for bot runs while preserving owner delegation", async () => {
+		const { createResidentCoreSessionBackend } = await import("./resident-core-session-backend.js");
+		ownerMock.runBotSession.mockResolvedValueOnce({
+			session: { conversationId: "conv-bot-live" },
+			stream: async function* () {
+				yield { type: "assistant", content: [{ type: "text", text: "Hello from bot" }] };
+				yield { type: "result", success: true };
+			},
+		});
+
+		const backend = createResidentCoreSessionBackend({
+			owner: ownerMock as never,
+			onServerEvent: serverEventSinkMock,
+			config: {
+				workingDir: "/tmp/workspace",
+				allowedTools: [],
+				conversationMode: "shared",
+				reuseSession: true,
+				agentName: "ResidentCoreLettaBot",
+			},
+		});
+
+		const { session, stream } = await backend.runSession([{ type: "text", text: "Hi bot" }] as never);
+		expect(session.conversationId).toBe("conv-bot-live");
+
+		for await (const _message of stream()) {
+			// Exhaust the stream so the terminal status event is emitted.
+		}
+
+		expect(ownerMock.runBotSession).toHaveBeenCalledWith(expect.objectContaining({
+			message: [{ type: "text", text: "Hi bot" }],
+			convKey: undefined,
+		}));
+		expect(serverEventSinkMock).toHaveBeenCalledWith({
+			type: "session.status",
+			payload: {
+				sessionId: "conv-bot-live",
+				status: "running",
+				title: "conv-bot-live",
+			},
+		});
+		expect(serverEventSinkMock).toHaveBeenCalledWith({
+			type: "stream.user_prompt",
+			payload: {
+				sessionId: "conv-bot-live",
+				prompt: "Hi bot",
+			},
+		});
+		expect(serverEventSinkMock).toHaveBeenCalledWith({
+			type: "stream.message",
+			payload: {
+				sessionId: "conv-bot-live",
+				message: expect.objectContaining({
+					type: "assistant",
+					content: "Hello from bot",
+				}),
+			},
+		});
+		expect(serverEventSinkMock).toHaveBeenCalledWith({
+			type: "session.status",
+			payload: {
+				sessionId: "conv-bot-live",
+				status: "completed",
+				title: "conv-bot-live",
+			},
+		});
+	});
+
+	it("does not emit projection events when bot startup fails before a session is established", async () => {
+		const { createResidentCoreSessionBackend } = await import("./resident-core-session-backend.js");
+		ownerMock.runBotSession.mockRejectedValueOnce(new Error("bot startup failed"));
+
+		const backend = createResidentCoreSessionBackend({
+			owner: ownerMock as never,
+			onServerEvent: serverEventSinkMock,
+			config: {
+				workingDir: "/tmp/workspace",
+				allowedTools: [],
+				conversationMode: "shared",
+				reuseSession: true,
+				agentName: "ResidentCoreLettaBot",
+			},
+		});
+
+		await expect(backend.runSession("hello")).rejects.toThrow("bot startup failed");
+		expect(serverEventSinkMock).not.toHaveBeenCalled();
 	});
 });
