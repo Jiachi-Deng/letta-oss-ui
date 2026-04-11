@@ -129,6 +129,7 @@ export function bootstrapElectronRuntime(): void {
 export function createResidentCoreChannelsRuntimeBundle(
   sessionOwner: ResidentCoreSessionOwner,
   onServerEvent?: ResidentCoreSessionBackendEventSink,
+  runtimeGeneration?: number,
 ): ResidentCoreChannelsRuntimeBundle {
   const runtimeConfig = getResidentCoreLettaBotRuntimeConfig();
   const botConfig = createResidentCoreLettaBotConfig(runtimeConfig);
@@ -136,6 +137,7 @@ export function createResidentCoreChannelsRuntimeBundle(
     owner: sessionOwner,
     config: botConfig,
     onServerEvent,
+    runtimeGeneration,
   });
   const lettabotHost = createResidentCoreLettaBotHost({
     config: botConfig,

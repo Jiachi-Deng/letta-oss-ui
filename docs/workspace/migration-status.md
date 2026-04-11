@@ -9,6 +9,7 @@
 - vendored lettabot 已接入
 - Telegram 和 desktop 已完成第一轮稳定化
 - channels runtime hot reload 已改成 rollback-safe 的两阶段切换，runtime config 现在只通过 `channels` 容器暴露渠道配置
+- channels runtime stale backend invalidation 现在受 runtime generation guard 保护，旧 host stop 不会误清当前 bot session
 - desktop 端旧的 `allowedTools` session.start 约定已移除，等待真实 policy 模型
 - Telegram / bot traces 现在会进入共享的 Resident Core projection/control-plane 路径
 

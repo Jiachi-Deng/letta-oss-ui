@@ -54,9 +54,29 @@ describe("ResidentCoreSessionBackend", () => {
 		expect(ownerMock.warmBotSession).toHaveBeenCalledTimes(1);
 		expect(ownerMock.ensureBotSessionForKey).toHaveBeenCalledTimes(1);
 		expect(ownerMock.runBotSession).toHaveBeenCalledTimes(1);
-		expect(ownerMock.invalidateBotSession).toHaveBeenCalledWith("conv-test");
+		expect(ownerMock.invalidateBotSession).toHaveBeenCalledWith("conv-test", undefined);
 		expect(createSessionMock).not.toHaveBeenCalled();
 		expect(resumeSessionMock).not.toHaveBeenCalled();
+	});
+
+	it("passes runtime generation through bot session invalidation", async () => {
+		const { createResidentCoreSessionBackend } = await import("./resident-core-session-backend.js");
+
+		const backend = createResidentCoreSessionBackend({
+			owner: ownerMock as never,
+			runtimeGeneration: 7,
+			config: {
+				workingDir: "/tmp/workspace",
+				allowedTools: [],
+				conversationMode: "shared",
+				reuseSession: true,
+				agentName: "ResidentCoreLettaBot",
+			},
+		});
+
+		backend.invalidateSession("conv-guarded");
+
+		expect(ownerMock.invalidateBotSession).toHaveBeenCalledWith("conv-guarded", 7);
 	});
 
 	it("emits shared projection events for bot runs while preserving owner delegation", async () => {

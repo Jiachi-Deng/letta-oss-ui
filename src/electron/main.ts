@@ -53,6 +53,7 @@ let residentCoreService: ReturnType<typeof createResidentCoreService> | null = n
 let lettabotBackend: SessionBackend | null = null;
 let cleanupPromise: Promise<void> | null = null;
 let reloadPromise: Promise<void> | null = null;
+let activeChannelsRuntimeGeneration = 0;
 const mainLog = createComponentLogger("main");
 
 function maskTelegramToken(token?: string | null): string | null {
@@ -102,6 +103,8 @@ async function reloadResidentCoreChannelsRuntimeUnsafe(): Promise<void> {
     const previousHost = lettabotHost;
     const previousBackend = lettabotBackend;
     const currentCodeIslandMonitor = codeIslandMonitor;
+    const previousGeneration = activeChannelsRuntimeGeneration;
+    const nextGeneration = previousGeneration + 1;
     const nextRuntimeConfig = getResidentCoreLettaBotRuntimeConfig();
 
     mainLog({
@@ -114,11 +117,19 @@ async function reloadResidentCoreChannelsRuntimeUnsafe(): Promise<void> {
     const nextRuntime = createResidentCoreChannelsRuntimeBundle(
         residentCoreSessionOwner,
         residentCoreService.ingestServerEvent.bind(residentCoreService),
+        nextGeneration,
     );
 
     try {
+        if (previousHost) {
+            await previousHost.stop();
+        }
+
+        await residentCoreService.cleanupAllSessions();
+
         await nextRuntime.lettabotHost.start();
     } catch (error) {
+        const originalError = error;
         mainLog({
             level: "error",
             decision_id: TG_RUNTIME_RELOAD_004,
@@ -129,7 +140,59 @@ async function reloadResidentCoreChannelsRuntimeUnsafe(): Promise<void> {
                 stack: error instanceof Error ? error.stack : undefined,
             },
         });
-        throw error;
+        await nextRuntime.lettabotHost.stop().catch((stopError) => {
+            mainLog({
+                level: "warn",
+                message: "resident core channels runtime failed to stop partially started host",
+                data: {
+                    error: stopError instanceof Error ? stopError.message : String(stopError),
+                    stack: stopError instanceof Error ? stopError.stack : undefined,
+                },
+            });
+        });
+
+        if (previousHost) {
+            try {
+                await previousHost.start();
+                activeChannelsRuntimeGeneration = previousGeneration;
+                residentCoreSessionOwner.setActiveBotRuntimeGeneration(previousGeneration);
+                lettabotBackend = previousBackend;
+                lettabotHost = previousHost;
+                codeIslandMonitor = currentCodeIslandMonitor;
+                mainLog({
+                    level: "warn",
+                    message: "resident core channels runtime rollback to previous host succeeded",
+                    data: {
+                        previousBackendConfigured: Boolean(previousBackend),
+                    },
+                });
+            } catch (rollbackError) {
+                lettabotBackend = null;
+                lettabotHost = null;
+                codeIslandMonitor = currentCodeIslandMonitor;
+                activeChannelsRuntimeGeneration = 0;
+                residentCoreSessionOwner.setActiveBotRuntimeGeneration(0);
+                mainLog({
+                    level: "error",
+                    message: "resident core channels runtime rollback failed; channels are offline",
+                    data: {
+                        error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+                        stack: rollbackError instanceof Error ? rollbackError.stack : undefined,
+                    },
+                });
+            }
+        } else {
+            lettabotBackend = null;
+            lettabotHost = null;
+            codeIslandMonitor = currentCodeIslandMonitor;
+            activeChannelsRuntimeGeneration = 0;
+            residentCoreSessionOwner.setActiveBotRuntimeGeneration(0);
+            mainLog({
+                level: "warn",
+                message: "resident core channels runtime reload failed with no previous host; channels are offline",
+            });
+        }
+        throw originalError;
     }
 
     mainLog({
@@ -142,15 +205,11 @@ async function reloadResidentCoreChannelsRuntimeUnsafe(): Promise<void> {
         },
     });
 
+    activeChannelsRuntimeGeneration = nextGeneration;
+    residentCoreSessionOwner.setActiveBotRuntimeGeneration(nextGeneration);
     lettabotBackend = nextRuntime.backend;
     lettabotHost = nextRuntime.lettabotHost;
     codeIslandMonitor = currentCodeIslandMonitor;
-
-    if (previousHost) {
-        await previousHost.stop();
-    }
-
-    await residentCoreService.cleanupAllSessions();
 
     mainLog({
         level: "info",
@@ -247,9 +306,12 @@ app.on("ready", () => {
         data: summarizeResidentCoreLettaBotRuntimeConfig(lettabotRuntimeConfig),
     });
     const lettabotWorkingDir = lettabotRuntimeConfig.workingDir;
+    activeChannelsRuntimeGeneration = 1;
+    residentCoreSessionOwner.setActiveBotRuntimeGeneration(activeChannelsRuntimeGeneration);
     lettabotBackend = createResidentCoreSessionBackend({
         owner: residentCoreSessionOwner,
         onServerEvent: residentCoreServerEventSink,
+        runtimeGeneration: activeChannelsRuntimeGeneration,
         config: {
             workingDir: lettabotWorkingDir,
             allowedTools: [],

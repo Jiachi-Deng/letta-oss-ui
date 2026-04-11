@@ -28,6 +28,13 @@ Desktop UI
 
 Telegram 则通过 vendored `lettabot` 接到同一个核心路径。
 
+channels runtime reload 现在遵循：
+
+- 共享 reload mutex，避免并发重载
+- `stop old -> cleanup -> start new -> commit globals`
+- reload 失败时优先回滚旧 host；回滚失败则 channels 进入 offline
+- bot session invalidation 带 runtime generation guard，旧 host 的失效回调不会误清当前 host 的 bot session
+
 ## Workspace assumption
 
 这个 repo 按下面这个 workspace 布局工作：

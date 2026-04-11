@@ -34,12 +34,15 @@ const recordDiagnosticEventMock = vi.hoisted(() => vi.fn());
 const bindResidentCoreServiceMock = vi.hoisted(() => vi.fn());
 const residentCoreBroadcastMock = vi.hoisted(() => vi.fn());
 const residentCoreServiceCleanupMock = vi.hoisted(() => vi.fn());
+const residentCoreSetActiveBotRuntimeGenerationMock = vi.hoisted(() => vi.fn());
 const createResidentCoreServiceMock = vi.hoisted(() => vi.fn(() => ({
 	handleClientEvent: vi.fn(async () => undefined),
 	ingestServerEvent: vi.fn(),
 	cleanupAllSessions: residentCoreServiceCleanupMock,
 })));
-const createResidentCoreSessionOwnerMock = vi.hoisted(() => vi.fn(() => ({})));
+const createResidentCoreSessionOwnerMock = vi.hoisted(() => vi.fn(() => ({
+	setActiveBotRuntimeGeneration: residentCoreSetActiveBotRuntimeGenerationMock,
+})));
 const createResidentCoreSessionBackendMock = vi.hoisted(() => vi.fn(() => ({ warmSession: vi.fn(async () => undefined), invalidateSession: vi.fn() })));
 const createResidentCoreRuntimeHostMock = vi.hoisted(() => vi.fn(() => ({})));
 
@@ -361,15 +364,17 @@ describe("main lifecycle", () => {
 		expect(saveAppConfigMock).toHaveBeenCalledTimes(1);
 		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledWith(expect.objectContaining({
 			onServerEvent: expect.any(Function),
+			runtimeGeneration: 1,
 		}));
 		expect(createResidentCoreChannelsRuntimeBundleMock).toHaveBeenCalledWith(
 			expect.anything(),
 			expect.any(Function),
+			2,
 		);
 		expect(lettabotHostStopMock).toHaveBeenCalledTimes(1);
 		expect(residentCoreServiceCleanupMock).toHaveBeenCalledTimes(1);
-		expect(nextHostStartMock.mock.invocationCallOrder[0]).toBeLessThan(lettabotHostStopMock.mock.invocationCallOrder[0]);
 		expect(lettabotHostStopMock.mock.invocationCallOrder[0]).toBeLessThan(residentCoreServiceCleanupMock.mock.invocationCallOrder[0]);
+		expect(residentCoreServiceCleanupMock.mock.invocationCallOrder[0]).toBeLessThan(nextHostStartMock.mock.invocationCallOrder[0]);
 		expect(createResidentCoreChannelsRuntimeBundleMock).toHaveBeenCalledTimes(1);
 		expect(nextHostStartMock).toHaveBeenCalledTimes(1);
 		expect(nextHostStopMock).not.toHaveBeenCalled();
@@ -477,12 +482,19 @@ describe("main lifecycle", () => {
 
 		expect(saveAppConfigMock).toHaveBeenCalledTimes(2);
 		expect(createResidentCoreChannelsRuntimeBundleMock).toHaveBeenCalledTimes(1);
+		expect(createResidentCoreChannelsRuntimeBundleMock).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.any(Function),
+			2,
+		);
 
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		expect(nextHostStartMock).toHaveBeenCalledTimes(1);
-		expect(lettabotHostStopMock).not.toHaveBeenCalled();
-		expect(residentCoreServiceCleanupMock).not.toHaveBeenCalled();
+		expect(lettabotHostStopMock).toHaveBeenCalledTimes(1);
+		expect(residentCoreServiceCleanupMock).toHaveBeenCalledTimes(1);
+		expect(lettabotHostStopMock.mock.invocationCallOrder[0]).toBeLessThan(residentCoreServiceCleanupMock.mock.invocationCallOrder[0]);
+		expect(residentCoreServiceCleanupMock.mock.invocationCallOrder[0]).toBeLessThan(nextHostStartMock.mock.invocationCallOrder[0]);
 
 		resolveNextHostStart?.();
 
@@ -493,8 +505,8 @@ describe("main lifecycle", () => {
 		expect(firstResult).toBe(secondResult);
 		expect(lettabotHostStopMock).toHaveBeenCalledTimes(1);
 		expect(residentCoreServiceCleanupMock).toHaveBeenCalledTimes(1);
-		expect(nextHostStartMock.mock.invocationCallOrder[0]).toBeLessThan(lettabotHostStopMock.mock.invocationCallOrder[0]);
 		expect(lettabotHostStopMock.mock.invocationCallOrder[0]).toBeLessThan(residentCoreServiceCleanupMock.mock.invocationCallOrder[0]);
+		expect(residentCoreServiceCleanupMock.mock.invocationCallOrder[0]).toBeLessThan(nextHostStartMock.mock.invocationCallOrder[0]);
 		expect(nextHostStopMock).not.toHaveBeenCalled();
 	});
 
@@ -585,10 +597,12 @@ describe("main lifecycle", () => {
 		expect(saveAppConfigMock).toHaveBeenCalledTimes(1);
 		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledWith(expect.objectContaining({
 			onServerEvent: expect.any(Function),
+			runtimeGeneration: 1,
 		}));
 		expect(createResidentCoreChannelsRuntimeBundleMock).toHaveBeenCalledWith(
 			expect.anything(),
 			expect.any(Function),
+			2,
 		);
 		expect(lettabotHostStopMock).toHaveBeenCalledTimes(1);
 		expect(residentCoreServiceCleanupMock).toHaveBeenCalledTimes(1);

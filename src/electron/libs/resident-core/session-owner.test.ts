@@ -157,6 +157,34 @@ describe("ResidentCoreSessionOwner shared agent identity", () => {
 		expect(owner.getSharedAgentIdentity()).toBe("agent-persisted");
 	});
 
+	it("ignores stale bot runtime invalidations from older channel generations", async () => {
+		const { createResidentCoreSessionOwner } = await import("./session-owner.js");
+		const owner = createResidentCoreSessionOwner({ runtimeHost: runtimeHostMock as never });
+		const close = vi.fn();
+		const session = {
+			close,
+			abort: vi.fn(async () => undefined),
+		};
+
+		owner.setActiveBotRuntimeGeneration(2);
+		(owner as any).botState.sessions.set("telegram:chat-1", {
+			session,
+			conversationId: "conv-bot",
+			agentId: "agent-shared",
+			initialized: true,
+			generation: 1,
+			lastUsedAt: Date.now(),
+		});
+
+		owner.invalidateBotSession("telegram:chat-1", 1);
+		expect(close).not.toHaveBeenCalled();
+		expect((owner as any).botState.sessions.has("telegram:chat-1")).toBe(true);
+
+		owner.invalidateBotSession("telegram:chat-1", 2);
+		expect(close).toHaveBeenCalledTimes(1);
+		expect((owner as any).botState.sessions.has("telegram:chat-1")).toBe(false);
+	});
+
 	it("exposes active agent metadata and the known registry entries", async () => {
 		writeResidentCoreState(userDataPath, {
 			schemaVersion: 1,

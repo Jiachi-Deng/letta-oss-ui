@@ -125,12 +125,40 @@ describe("main-runtime resident core wiring", () => {
 
 		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledWith(expect.objectContaining({
 			onServerEvent,
+			runtimeGeneration: undefined,
 		}));
 		expect(createResidentCoreLettaBotHostMock).toHaveBeenCalledWith(expect.objectContaining({
 			backend,
 		}));
 		expect(bundle.backend).toBe(backend);
 		expect(bundle.lettabotHost).toBe(host);
+	});
+
+	it("threads the runtime generation through Resident Core channels runtime bundles", async () => {
+		const backend = {
+			warmSession: vi.fn(async () => undefined),
+			invalidateSession: vi.fn(),
+			getSession: vi.fn(),
+			ensureSessionForKey: vi.fn(),
+			persistSessionState: vi.fn(),
+			runSession: vi.fn(),
+			syncTodoToolCall: vi.fn(),
+		};
+		const host = {
+			start: vi.fn(async () => undefined),
+			stop: vi.fn(),
+			getBot: vi.fn(),
+			getBackend: vi.fn(),
+		};
+		createResidentCoreSessionBackendMock.mockReturnValue(backend);
+		createResidentCoreLettaBotHostMock.mockReturnValue(host);
+
+		const { createResidentCoreChannelsRuntimeBundle } = await import("./main-runtime.js");
+		createResidentCoreChannelsRuntimeBundle({} as never, vi.fn(), 3);
+
+		expect(createResidentCoreSessionBackendMock).toHaveBeenCalledWith(expect.objectContaining({
+			runtimeGeneration: 3,
+		}));
 	});
 
 	it("no-ops channels startup when the runtime config is absent", async () => {

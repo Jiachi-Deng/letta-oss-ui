@@ -12,6 +12,7 @@ export type ResidentCoreSessionBackendOptions = {
 	owner?: ResidentCoreSessionOwner;
 	config: BotConfig;
 	onServerEvent?: ResidentCoreSessionBackendEventSink;
+	runtimeGeneration?: number;
 };
 
 export class ResidentCoreSessionBackend {
@@ -49,7 +50,7 @@ export class ResidentCoreSessionBackend {
 	}
 
 	invalidateSession(key?: string): void {
-		this.owner.invalidateBotSession(key);
+		this.owner.invalidateBotSession(key, this.options.runtimeGeneration);
 	}
 
 	getSession(key: string): Session | undefined {

@@ -62,6 +62,8 @@
 2. 第一条消息能回
 3. 连续多条消息时不会明显卡死
 4. 保存设置后 channels host 能按新配置继续工作
+5. 快速连续保存设置时不会并发重载同一条 channels runtime
+6. reload 失败后旧 host 能回滚，或者至少明确进入 channels offline，而不是把 desktop 核心一起打挂
 
 ### 3.3 CodeIsland 路径
 
@@ -102,6 +104,13 @@ bun run evals:desktop-renderer -- --case example-desktop-first-message-failure
 ```
 
 `verify:resident-core` 会覆盖 Resident Core 相关 Electron 测试，包括 `resident-core-session-backend`、`resident-core`、`runtime-host`、`safety`、`session-owner`、`session-store`、channels host、main runtime、IPC 和设置保存链路。
+
+如果改动触到 channels runtime reload / rollback / bot session invalidation，至少补跑：
+
+```bash
+cd /Users/jachi/Desktop/letta-workspace/app/letta-desktop
+bun run test:run -- src/electron/main.test.ts src/electron/libs/main-runtime.test.ts src/electron/libs/resident-core/resident-core-session-backend.test.ts src/electron/libs/resident-core/session-owner.test.ts
+```
 
 ### vendored lettabot
 

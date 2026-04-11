@@ -224,6 +224,7 @@ export class ResidentCoreSessionOwner {
 	private readonly desktopState: NamespaceState<LettaSession>;
 	private readonly botState: NamespaceState<BotSession>;
 	private readonly sharedIdentity: SharedIdentityState;
+	private activeBotRuntimeGeneration = 0;
 
 	constructor(options: { runtimeHost?: ResidentCoreRuntimeHost } = {}) {
 		this.runtimeHost = options.runtimeHost ?? createResidentCoreRuntimeHost();
@@ -893,7 +894,24 @@ export class ResidentCoreSessionOwner {
 		}
 	}
 
-	invalidateBotSession(key?: string): void {
+	setActiveBotRuntimeGeneration(generation: number): void {
+		this.activeBotRuntimeGeneration = generation;
+	}
+
+	invalidateBotSession(key?: string, generation?: number): void {
+		if (generation !== undefined && generation !== this.activeBotRuntimeGeneration) {
+			log({
+				level: "debug",
+				message: "resident core ignored stale bot session invalidation",
+				data: {
+					key: key ? normalizeConvKey(key) : "all",
+					generation,
+					activeGeneration: this.activeBotRuntimeGeneration,
+				},
+			});
+			return;
+		}
+
 		if (!key) {
 			for (const record of this.botState.sessions.values()) {
 				this.closeBotSession(record.session);
