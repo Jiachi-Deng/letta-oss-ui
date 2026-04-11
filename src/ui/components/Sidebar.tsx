@@ -74,28 +74,6 @@ export function Sidebar({
   const canDeleteActiveAgent = connected && Boolean(activeAgentKey) && knownAgents.length > 1;
 
   useEffect(() => {
-    if (!agentEditorMode) {
-      setAgentDraftName("");
-      return;
-    }
-
-    if (agentEditorMode === "create") {
-      setAgentDraftName("");
-      return;
-    }
-
-    setAgentDraftName(activeAgent?.name?.trim() || activeAgentKey || "");
-  }, [agentEditorMode, activeAgent?.name, activeAgentKey]);
-
-  useEffect(() => {
-    setCopied(false);
-    if (closeTimerRef.current) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-  }, [resumeSessionId]);
-
-  useEffect(() => {
     return () => {
       if (closeTimerRef.current) {
         window.clearTimeout(closeTimerRef.current);
@@ -195,7 +173,10 @@ export function Sidebar({
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             className="rounded-lg border border-ink-900/10 bg-surface-secondary px-2.5 py-1.5 text-[11px] font-medium text-ink-700 transition-colors hover:border-ink-900/20 hover:bg-surface-tertiary disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={() => setAgentEditorMode("create")}
+            onClick={() => {
+              setAgentDraftName("");
+              setAgentEditorMode("create");
+            }}
             disabled={!connected}
           >
             Create agent
@@ -204,6 +185,7 @@ export function Sidebar({
             className="rounded-lg border border-ink-900/10 bg-surface-secondary px-2.5 py-1.5 text-[11px] font-medium text-ink-700 transition-colors hover:border-ink-900/20 hover:bg-surface-tertiary disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => {
               if (!activeAgentKey) return;
+              setAgentDraftName(activeAgent?.name?.trim() || activeAgentKey);
               setAgentEditorMode("rename");
             }}
             disabled={!canEditActiveAgent}
@@ -301,7 +283,17 @@ export function Sidebar({
                       </svg>
                       Delete this session
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 outline-none hover:bg-ink-900/5" onSelect={() => setResumeSessionId(session.id)}>
+                    <DropdownMenu.Item
+                      className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 outline-none hover:bg-ink-900/5"
+                      onSelect={() => {
+                        setCopied(false);
+                        if (closeTimerRef.current) {
+                          window.clearTimeout(closeTimerRef.current);
+                          closeTimerRef.current = null;
+                        }
+                        setResumeSessionId(session.id);
+                      }}
+                    >
                       <svg viewBox="0 0 24 24" className="h-4 w-4 text-ink-500" fill="none" stroke="currentColor" strokeWidth="1.8">
                         <path d="M4 5h16v14H4z" /><path d="M7 9h10M7 12h6" /><path d="M13 15l3 2-3 2" />
                       </svg>
@@ -349,7 +341,14 @@ export function Sidebar({
           </svg>
         </button>
       </div>
-      <Dialog.Root open={!!resumeSessionId} onOpenChange={(open) => !open && setResumeSessionId(null)}>
+      <Dialog.Root
+        open={!!resumeSessionId}
+        onOpenChange={(open) => {
+          if (open) return;
+          setCopied(false);
+          setResumeSessionId(null);
+        }}
+      >
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-ink-900/40 backdrop-blur-sm" />
           <Dialog.Content className="fixed left-1/2 top-1/2 w-full max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-surface p-6 shadow-xl">

@@ -341,7 +341,7 @@ export class ResidentCoreSessionOwner {
 				: {};
 			const agentId = await createAgent(createOptions);
 			createdAgentKey = agentId;
-			let createdName = options.name?.trim();
+			const createdName = options.name?.trim();
 
 			if (createdName) {
 				try {

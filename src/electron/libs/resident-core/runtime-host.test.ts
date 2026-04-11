@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { LettaAppConfig } from "../config.js";
+import type { TraceContext } from "../trace.js";
 
 const getAppConfigStateMock = vi.hoisted(() => vi.fn());
 const prepareRuntimeConnectionMock = vi.hoisted(() => vi.fn());
@@ -34,7 +36,10 @@ describe("createResidentCoreRuntimeHost", () => {
 		const host = createResidentCoreRuntimeHost();
 
 		expect(host.getAppConfigState()).toEqual({ config: { connectionType: "letta-server" } });
-		await host.prepareRuntimeConnection({ connectionType: "letta-server" } as any, { traceId: "trc" } as any);
+		await host.prepareRuntimeConnection(
+			{ connectionType: "letta-server" } as LettaAppConfig,
+			{ traceId: "trc" } as TraceContext,
+		);
 		expect(prepareRuntimeConnectionMock).toHaveBeenCalledTimes(1);
 		expect(diagnostics.getDiagnosticSummary("trc")).toMatchObject({
 			lastSuccessfulDecisionId: "RC_RUNTIME_PREP_002",
@@ -50,7 +55,10 @@ describe("createResidentCoreRuntimeHost", () => {
 		const { createResidentCoreRuntimeHost } = await import("./runtime-host.js");
 		const host = createResidentCoreRuntimeHost();
 
-		await expect(host.prepareRuntimeConnection({ connectionType: "letta-server" } as any, { traceId: "trc_runtime_fail" } as any)).rejects.toThrow("bootstrap failed");
+		await expect(host.prepareRuntimeConnection(
+			{ connectionType: "letta-server" } as LettaAppConfig,
+			{ traceId: "trc_runtime_fail" } as TraceContext,
+		)).rejects.toThrow("bootstrap failed");
 		expect(diagnostics.getDiagnosticSummary("trc_runtime_fail")).toMatchObject({
 			errorCode: "E_RESIDENT_CORE_RUNTIME_PREP_FAILED",
 			firstFailedDecisionId: "RC_RUNTIME_PREP_003",

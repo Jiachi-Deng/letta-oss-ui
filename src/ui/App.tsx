@@ -3,17 +3,21 @@ import type { CanUseToolResponse } from "./types";
 import { useIPC } from "./hooks/useIPC";
 import { useMessageWindow } from "./hooks/useMessageWindow";
 import { useAppStore } from "./store/useAppStore";
-import type { ServerEvent } from "./types";
+import type { PermissionRequest } from "./store/useAppStore";
+import type { ServerEvent, StreamMessage } from "./types";
 import { Sidebar } from "./components/Sidebar";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { StartSessionModal } from "./components/StartSessionModal";
 import { OnboardingModal } from "./components/OnboardingModal";
-import { PromptInput, usePromptActions } from "./components/PromptInput";
+import { PromptInput } from "./components/PromptInput";
+import { usePromptActions } from "./hooks/usePromptActions";
 import { MessageCard } from "./components/EventCard";
 import MDContent from "./render/markdown";
 import { formatDiagnosticSummary } from "../shared/diagnostics-format";
 
 const SCROLL_THRESHOLD = 50;
+const EMPTY_MESSAGES: StreamMessage[] = [];
+const EMPTY_PERMISSION_REQUESTS: PermissionRequest[] = [];
 type DiagnosticSummaryPayload = Awaited<ReturnType<Window["electron"]["getDiagnosticSummary"]>>;
 type RunnerErrorContext = {
   message: string;
@@ -137,8 +141,8 @@ function App() {
   const { handleStartFromModal } = usePromptActions(sendEvent);
 
   const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
-  const messages = activeSession?.messages ?? [];
-  const permissionRequests = activeSession?.permissionRequests ?? [];
+  const messages = activeSession?.messages ?? EMPTY_MESSAGES;
+  const permissionRequests = activeSession?.permissionRequests ?? EMPTY_PERMISSION_REQUESTS;
   const isRunning = activeSession?.status === "running";
 
   const {
@@ -148,7 +152,13 @@ function App() {
     loadMoreMessages,
     resetToLatest,
     totalMessages,
-  } = useMessageWindow(messages, permissionRequests, activeSessionId);
+  } = useMessageWindow(messages, activeSessionId);
+  const visibleCodeIslandDiagnosticSummary = codeIslandWarningTraceId
+    ? codeIslandDiagnosticSummary
+    : null;
+  const visibleGlobalErrorDiagnosticSummary = runnerErrorContext?.message === globalError
+    ? globalErrorDiagnosticSummary
+    : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -186,7 +196,6 @@ function App() {
 
   useEffect(() => {
     if (!codeIslandWarningTraceId) {
-      setCodeIslandDiagnosticSummary(null);
       return;
     }
 
@@ -210,7 +219,6 @@ function App() {
 
   useEffect(() => {
     if (!runnerErrorContext) {
-      setGlobalErrorDiagnosticSummary(null);
       return;
     }
 
@@ -238,19 +246,6 @@ function App() {
       cancelled = true;
     };
   }, [runnerErrorContext]);
-
-  useEffect(() => {
-    if (!globalError) {
-      setRunnerErrorContext(null);
-      setGlobalErrorDiagnosticSummary(null);
-      return;
-    }
-
-    if (runnerErrorContext && runnerErrorContext.message !== globalError) {
-      setRunnerErrorContext(null);
-      setGlobalErrorDiagnosticSummary(null);
-    }
-  }, [globalError, runnerErrorContext]);
 
   // 启动时检查 API 配置
   useEffect(() => {
@@ -326,7 +321,7 @@ function App() {
         ? null
         : `${nextConfigState.config.connectionType === "anthropic-compatible" ? "Anthropic" : "OpenAI"}-compatible mode is active. Letta will register a BYOK provider on your local Letta server before starting the session.`,
     );
-  }, [sendEvent]);
+  }, []);
 
   useEffect(() => {
     if (!activeSessionId || !connected) return;
@@ -396,19 +391,20 @@ function App() {
 
   // Reset scroll state on session change
   useEffect(() => {
-    setShouldAutoScroll(true);
-    setHasNewMessages(false);
     prevMessagesLengthRef.current = 0;
-    setTimeout(() => {
+    const timeout = window.setTimeout(() => {
+      setShouldAutoScroll(true);
+      setHasNewMessages(false);
       messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
     }, 100);
+    return () => window.clearTimeout(timeout);
   }, [activeSessionId]);
 
   useEffect(() => {
     if (shouldAutoScroll) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     } else if (messages.length > prevMessagesLengthRef.current && prevMessagesLengthRef.current > 0) {
-      setHasNewMessages(true);
+      window.queueMicrotask(() => setHasNewMessages(true));
     }
     prevMessagesLengthRef.current = messages.length;
   }, [messages, partialMessage, shouldAutoScroll]);
@@ -477,10 +473,10 @@ function App() {
           <div className="border-b border-warning/20 bg-warning-light px-6 py-3">
             <div className="mx-auto flex max-w-3xl items-center gap-3">
               <span className="text-sm font-medium text-warning">{codeIslandWarning}</span>
-              {codeIslandDiagnosticSummary && (
+              {visibleCodeIslandDiagnosticSummary && (
                 <button
                   className="text-xs font-medium text-warning underline-offset-2 transition-colors hover:text-warning/80 hover:underline"
-                  onClick={() => void handleCopyDiagnostics(codeIslandDiagnosticSummary, "code-island")}
+                  onClick={() => void handleCopyDiagnostics(visibleCodeIslandDiagnosticSummary, "code-island")}
                 >
                   {copyFeedback === "code-island" ? "Copied" : "Copy diagnostics"}
                 </button>
@@ -644,10 +640,10 @@ function App() {
         <div className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-error/20 bg-error-light px-4 py-3 shadow-lg">
           <div className="flex items-center gap-3">
             <span className="text-sm text-error">{globalError}</span>
-            {globalErrorDiagnosticSummary && (
+            {visibleGlobalErrorDiagnosticSummary && (
               <button
                 className="text-xs font-medium text-error underline-offset-2 transition-colors hover:text-error/80 hover:underline"
-                onClick={() => void handleCopyDiagnostics(globalErrorDiagnosticSummary, "global-error")}
+                onClick={() => void handleCopyDiagnostics(visibleGlobalErrorDiagnosticSummary, "global-error")}
               >
                 {copyFeedback === "global-error" ? "Copied" : "Copy diagnostics"}
               </button>

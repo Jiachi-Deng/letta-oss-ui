@@ -30,7 +30,6 @@ export function DiagnosticsPanel({ onBackToChat }: DiagnosticsPanelProps) {
   const [traces, setTraces] = useState<DiagnosticSummaryListItem[]>([]);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const [selectedSummary, setSelectedSummary] = useState<DiagnosticSummaryDetail>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyMode, setCopyMode] = useState<CopyMode>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -89,35 +88,27 @@ export function DiagnosticsPanel({ onBackToChat }: DiagnosticsPanelProps) {
     return [...codes].sort();
   }, [traces]);
 
-  useEffect(() => {
-    if (visibleTraces.length === 0) {
-      if (selectedTraceId !== null) {
-        setSelectedTraceId(null);
-      }
-      return;
+  const effectiveSelectedTraceId = useMemo(() => {
+    if (visibleTraces.length === 0) return null;
+    if (selectedTraceId && visibleTraces.some((item) => item.traceId === selectedTraceId)) {
+      return selectedTraceId;
     }
-
-    if (!selectedTraceId) {
-      setSelectedTraceId(visibleTraces[0].traceId);
-      return;
-    }
-
-    if (!visibleTraces.some((item) => item.traceId === selectedTraceId)) {
-      setSelectedTraceId(visibleTraces[0].traceId);
-    }
+    return visibleTraces[0].traceId;
   }, [selectedTraceId, visibleTraces]);
 
+  const visibleSelectedSummary = selectedSummary?.traceId === effectiveSelectedTraceId
+    ? selectedSummary
+    : null;
+  const isLoadingSelectedTrace = Boolean(effectiveSelectedTraceId && !visibleSelectedSummary && !error);
+
   useEffect(() => {
-    if (!selectedTraceId) {
-      setSelectedSummary(null);
-      setIsLoading(false);
+    if (!effectiveSelectedTraceId) {
       return;
     }
 
     let cancelled = false;
-    setIsLoading(true);
 
-    window.electron.getDiagnosticSummary(selectedTraceId)
+    window.electron.getDiagnosticSummary(effectiveSelectedTraceId)
       .then((summary) => {
         if (cancelled) return;
         setSelectedSummary(summary);
@@ -129,16 +120,11 @@ export function DiagnosticsPanel({ onBackToChat }: DiagnosticsPanelProps) {
         setSelectedSummary(null);
         setError("Could not load the selected diagnostic trace.");
       })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
-      });
 
     return () => {
       cancelled = true;
     };
-  }, [selectedTraceId]);
+  }, [effectiveSelectedTraceId]);
 
   useEffect(() => {
     return () => {
@@ -260,7 +246,7 @@ export function DiagnosticsPanel({ onBackToChat }: DiagnosticsPanelProps) {
               </div>
             ) : (
               visibleTraces.map((trace) => {
-                const isSelected = trace.traceId === selectedTraceId;
+                const isSelected = trace.traceId === effectiveSelectedTraceId;
                 return (
                   <button
                     key={trace.traceId}
@@ -303,7 +289,7 @@ export function DiagnosticsPanel({ onBackToChat }: DiagnosticsPanelProps) {
             </div>
           )}
 
-          {!selectedTraceId && !isLoading && (
+          {!effectiveSelectedTraceId && !isLoadingSelectedTrace && (
             <div className="flex flex-1 items-center justify-center text-center">
               <div>
                 <div className="text-lg font-medium text-ink-800">
@@ -318,19 +304,19 @@ export function DiagnosticsPanel({ onBackToChat }: DiagnosticsPanelProps) {
             </div>
           )}
 
-          {selectedSummary && (
+          {visibleSelectedSummary && (
             <div className="grid gap-4">
               <div className="rounded-2xl border border-ink-900/10 bg-surface p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-wide text-accent">Trace summary</div>
-                    <h2 className="mt-2 text-xl font-semibold text-ink-800">{selectedSummary.summary}</h2>
+                    <h2 className="mt-2 text-xl font-semibold text-ink-800">{visibleSelectedSummary.summary}</h2>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted">
-                      <span className="rounded-full bg-ink-900/5 px-3 py-1">{selectedSummary.traceId}</span>
-                      <span className="rounded-full bg-ink-900/5 px-3 py-1">Turn: {selectedSummary.turnId ?? "n/a"}</span>
-                      <span className="rounded-full bg-ink-900/5 px-3 py-1">Session: {selectedSummary.sessionId ?? "n/a"}</span>
-                      <span className="rounded-full bg-ink-900/5 px-3 py-1">Steps: {selectedSummary.stepCount ?? selectedSummary.steps.length}</span>
-                      <span className="rounded-full bg-ink-900/5 px-3 py-1">Updated: {formatTime(selectedSummary.updatedAt)}</span>
+                      <span className="rounded-full bg-ink-900/5 px-3 py-1">{visibleSelectedSummary.traceId}</span>
+                      <span className="rounded-full bg-ink-900/5 px-3 py-1">Turn: {visibleSelectedSummary.turnId ?? "n/a"}</span>
+                      <span className="rounded-full bg-ink-900/5 px-3 py-1">Session: {visibleSelectedSummary.sessionId ?? "n/a"}</span>
+                      <span className="rounded-full bg-ink-900/5 px-3 py-1">Steps: {visibleSelectedSummary.stepCount ?? visibleSelectedSummary.steps.length}</span>
+                      <span className="rounded-full bg-ink-900/5 px-3 py-1">Updated: {formatTime(visibleSelectedSummary.updatedAt)}</span>
                     </div>
                   </div>
 
@@ -338,14 +324,14 @@ export function DiagnosticsPanel({ onBackToChat }: DiagnosticsPanelProps) {
                     <button
                       type="button"
                       className="rounded-xl border border-ink-900/10 bg-surface px-4 py-2 text-sm text-ink-700 transition-colors hover:bg-surface-tertiary"
-                      onClick={() => void copyText(formatDiagnosticSummary(selectedSummary), "compact")}
+                      onClick={() => void copyText(formatDiagnosticSummary(visibleSelectedSummary), "compact")}
                     >
                       {copyMode === "compact" ? "Copied" : "Copy diagnostics"}
                     </button>
                     <button
                       type="button"
                       className="rounded-xl border border-ink-900/10 bg-surface px-4 py-2 text-sm text-ink-700 transition-colors hover:bg-surface-tertiary"
-                      onClick={() => void copyText(formatFullDiagnosticTrace(selectedSummary), "full")}
+                      onClick={() => void copyText(formatFullDiagnosticTrace(visibleSelectedSummary), "full")}
                     >
                       {copyMode === "full" ? "Copied" : "Copy full trace"}
                     </button>
@@ -354,16 +340,16 @@ export function DiagnosticsPanel({ onBackToChat }: DiagnosticsPanelProps) {
 
                 <div className="mt-4 grid gap-2">
                   <div className="text-sm text-ink-700">
-                    <span className="font-medium">Error code:</span> {selectedSummary.errorCode ?? "n/a"}
+                    <span className="font-medium">Error code:</span> {visibleSelectedSummary.errorCode ?? "n/a"}
                   </div>
                   <div className="text-sm text-ink-700">
-                    <span className="font-medium">Last successful decision:</span> {selectedSummary.lastSuccessfulDecisionId ?? "n/a"}
+                    <span className="font-medium">Last successful decision:</span> {visibleSelectedSummary.lastSuccessfulDecisionId ?? "n/a"}
                   </div>
                   <div className="text-sm text-ink-700">
-                    <span className="font-medium">First failed decision:</span> {selectedSummary.firstFailedDecisionId ?? "n/a"}
+                    <span className="font-medium">First failed decision:</span> {visibleSelectedSummary.firstFailedDecisionId ?? "n/a"}
                   </div>
                   <div className="text-sm text-ink-700">
-                    <span className="font-medium">Suggested action:</span> {selectedSummary.suggestedAction ?? "n/a"}
+                    <span className="font-medium">Suggested action:</span> {visibleSelectedSummary.suggestedAction ?? "n/a"}
                   </div>
                 </div>
               </div>
@@ -374,8 +360,8 @@ export function DiagnosticsPanel({ onBackToChat }: DiagnosticsPanelProps) {
                   Use <span className="font-medium text-ink-700">Copy diagnostics</span> for the compact summary and <span className="font-medium text-ink-700">Copy full trace</span> when you need step data and key metadata.
                 </div>
                 <div className="mt-4 grid gap-3">
-                  {selectedSummary.steps.map((step, index) => (
-                    <div key={`${selectedSummary.traceId}-${index}`} className="rounded-xl border border-ink-900/10 bg-surface-secondary px-4 py-3">
+                  {visibleSelectedSummary.steps.map((step, index) => (
+                    <div key={`${visibleSelectedSummary.traceId}-${index}`} className="rounded-xl border border-ink-900/10 bg-surface-secondary px-4 py-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <span
                           className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
@@ -405,7 +391,7 @@ export function DiagnosticsPanel({ onBackToChat }: DiagnosticsPanelProps) {
             </div>
           )}
 
-          {!selectedSummary && isLoading && (
+          {!visibleSelectedSummary && isLoadingSelectedTrace && (
             <div className="flex flex-1 items-center justify-center text-center text-sm text-muted">
               Loading trace details...
             </div>

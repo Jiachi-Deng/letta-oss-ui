@@ -492,9 +492,10 @@ export function getLatestDiagnosticSummaryForSession(
 
 export function listDiagnosticSummaries(): DiagnosticSummaryListItem[] {
   return getPersistableDiagnosticSummaries().map((summary) => {
-    const { steps: _steps, ...listItem } = summary;
+    const listItem = { ...summary } as Partial<DiagnosticSummary>;
+    delete listItem.steps;
     return listItem;
-  });
+  }) as DiagnosticSummaryListItem[];
 }
 
 export function listDiagnosticSteps(traceId: string): DiagnosticStep[] {

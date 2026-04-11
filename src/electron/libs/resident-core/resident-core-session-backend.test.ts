@@ -84,7 +84,8 @@ describe("ResidentCoreSessionBackend", () => {
 		const { session, stream } = await backend.runSession([{ type: "text", text: "Hi bot" }] as never);
 		expect(session.conversationId).toBe("conv-bot-live");
 
-		for await (const _message of stream()) {
+		for await (const message of stream()) {
+			void message;
 			// Exhaust the stream so the terminal status event is emitted.
 		}
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { CanUseToolResponse } from "../types";
 import type { PermissionRequest } from "../store/useAppStore";
 
@@ -19,15 +19,20 @@ export function DecisionPanel({
   request: PermissionRequest;
   onSubmit: (result: CanUseToolResponse) => void;
 }) {
+  return <DecisionPanelState key={request.toolUseId} request={request} onSubmit={onSubmit} />;
+}
+
+function DecisionPanelState({
+  request,
+  onSubmit,
+}: {
+  request: PermissionRequest;
+  onSubmit: (result: CanUseToolResponse) => void;
+}) {
   const input = request.input as AskUserQuestionInput | null;
   const questions = input?.questions ?? [];
   const [selectedOptions, setSelectedOptions] = useState<Record<number, string[]>>({});
   const [otherInputs, setOtherInputs] = useState<Record<number, string>>({});
-
-  useEffect(() => {
-    setSelectedOptions({});
-    setOtherInputs({});
-  }, [request.toolUseId]);
 
   const toggleOption = (qIndex: number, optionLabel: string, multiSelect?: boolean) => {
     setSelectedOptions((prev) => {

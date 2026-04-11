@@ -1,6 +1,5 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { StreamMessage } from "../types";
-import type { PermissionRequest } from "../store/useAppStore";
 
 const VISIBLE_WINDOW_SIZE = 3;
 const LOAD_BATCH_SIZE = 3;
@@ -49,24 +48,23 @@ function calculateVisibleStartIndex(
 
 export function useMessageWindow(
     messages: StreamMessage[],
-    permissionRequests: PermissionRequest[],
     sessionId: string | null
 ): MessageWindowState {
-    const [visibleUserInputCount, setVisibleUserInputCount] = useState(VISIBLE_WINDOW_SIZE);
-    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-    const prevSessionIdRef = useRef<string | null>(null);
+    const [windowState, setWindowState] = useState({
+        sessionId,
+        visibleUserInputCount: VISIBLE_WINDOW_SIZE,
+        isLoadingHistory: false,
+    });
+
+    const visibleUserInputCount = windowState.sessionId === sessionId
+        ? windowState.visibleUserInputCount
+        : VISIBLE_WINDOW_SIZE;
+    const isLoadingHistory = windowState.sessionId === sessionId
+        ? windowState.isLoadingHistory
+        : false;
 
     const userInputIndices = useMemo(() => getUserInputIndices(messages), [messages]);
     const totalUserInputs = userInputIndices.length;
-
-    // Reset window state on session change
-    useEffect(() => {
-        if (sessionId !== prevSessionIdRef.current) {
-            setVisibleUserInputCount(VISIBLE_WINDOW_SIZE);
-            setIsLoadingHistory(false);
-            prevSessionIdRef.current = sessionId;
-        }
-    }, [sessionId]);
 
     const { visibleMessages, visibleStartIndex } = useMemo(() => {
         if (messages.length === 0) {
@@ -83,27 +81,48 @@ export function useMessageWindow(
             }));
 
         return { visibleMessages: visible, visibleStartIndex: startIndex };
-    }, [messages, visibleUserInputCount, permissionRequests.length]);
+    }, [messages, visibleUserInputCount]);
 
     const hasMoreHistory = visibleStartIndex > 0;
 
     const loadMoreMessages = useCallback(() => {
         if (!hasMoreHistory || isLoadingHistory) return;
 
-        setIsLoadingHistory(true);
+        setWindowState({
+            sessionId,
+            visibleUserInputCount,
+            isLoadingHistory: true,
+        });
 
         requestAnimationFrame(() => {
-            setVisibleUserInputCount((prev) => Math.min(prev + LOAD_BATCH_SIZE, totalUserInputs));
+            setWindowState((current) => ({
+                sessionId,
+                visibleUserInputCount: Math.min(
+                    (current.sessionId === sessionId ? current.visibleUserInputCount : VISIBLE_WINDOW_SIZE) + LOAD_BATCH_SIZE,
+                    totalUserInputs,
+                ),
+                isLoadingHistory: true,
+            }));
 
             setTimeout(() => {
-                setIsLoadingHistory(false);
+                setWindowState((current) => ({
+                    sessionId,
+                    visibleUserInputCount: current.sessionId === sessionId
+                        ? current.visibleUserInputCount
+                        : VISIBLE_WINDOW_SIZE,
+                    isLoadingHistory: false,
+                }));
             }, 100);
         });
-    }, [hasMoreHistory, isLoadingHistory, totalUserInputs]);
+    }, [hasMoreHistory, isLoadingHistory, sessionId, totalUserInputs, visibleUserInputCount]);
 
     const resetToLatest = useCallback(() => {
-        setVisibleUserInputCount(VISIBLE_WINDOW_SIZE);
-    }, []);
+        setWindowState({
+            sessionId,
+            visibleUserInputCount: VISIBLE_WINDOW_SIZE,
+            isLoadingHistory: false,
+        });
+    }, [sessionId]);
 
     const visibleUserInputs = useMemo(() => {
         return visibleMessages.filter((item) => item.message.type === "user_prompt").length;

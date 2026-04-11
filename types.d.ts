@@ -109,6 +109,8 @@ type AppConfigState = {
 }
 
 type UnsubscribeFunction = () => void;
+type ClientEvent = import("./src/shared/protocol").ClientEvent;
+type ServerEvent = import("./src/shared/protocol").ServerEvent;
 
 type EventPayloadMapping = {
     statistics: Statistics;
@@ -128,8 +130,8 @@ interface Window {
         subscribeStatistics: (callback: (statistics: Statistics) => void) => UnsubscribeFunction;
         getStaticData: () => Promise<StaticData>;
         // Letta Agent IPC APIs
-        sendClientEvent: (event: any) => void;
-        onServerEvent: (callback: (event: any) => void) => UnsubscribeFunction;
+        sendClientEvent: (event: ClientEvent) => void;
+        onServerEvent: (callback: (event: ServerEvent) => void) => UnsubscribeFunction;
         getRecentCwds: (limit?: number) => Promise<string[]>;
         getAppConfig: () => Promise<AppConfigState>;
         listDiagnosticSummaries: () => Promise<DiagnosticSummaryListItem[]>;

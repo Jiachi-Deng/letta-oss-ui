@@ -56,14 +56,14 @@ export class ResidentCoreSessionBackend {
 		return this.owner.getBotSession(key) as Session | undefined;
 	}
 
-	async ensureSessionForKey(key: string, _bootstrapRetried = false): Promise<Session> {
+	async ensureSessionForKey(key: string): Promise<Session> {
 		return this.owner.ensureBotSessionForKey({
 			config: this.options.config,
 			convKey: key,
 		}) as Promise<Session>;
 	}
 
-	persistSessionState(_session: Session, _convKey?: string): void {
+	persistSessionState(): void {
 		// The Resident Core owner is authoritative for session state.
 	}
 

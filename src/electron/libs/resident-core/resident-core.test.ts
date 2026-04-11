@@ -149,17 +149,6 @@ describe("ResidentCoreService", () => {
 	});
 
 	it("preserves session projections across cleanup while sanitizing running state", async () => {
-		const pendingPermissions = new Map([
-			[
-				"tool-1",
-				{
-					toolUseId: "tool-1",
-					toolName: "Bash",
-					input: { command: "echo hello" },
-					resolve: vi.fn(),
-				},
-			],
-		]);
 		const { getSessionProjection } = await import("../runtime-state.js");
 		const {
 			readResidentCoreSessionProjectionState,

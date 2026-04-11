@@ -9,7 +9,6 @@ import {
   SERVER_RECOVERY_001,
   SERVER_RESOLVE_001,
   SERVER_START_001,
-  SERVER_START_002,
 } from "../../shared/decision-ids.js";
 
 const existsSyncMock = vi.hoisted(() => vi.fn<(path: string) => boolean>());

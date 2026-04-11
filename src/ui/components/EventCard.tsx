@@ -27,6 +27,17 @@ type AskUserQuestionInput = {
   }>;
 };
 
+type ToolInputObject = Partial<Record<
+  "command" | "file_path" | "pattern" | "description" | "url",
+  unknown
+>>;
+
+function getStringToolInput(input: unknown, key: keyof ToolInputObject): string | null {
+  if (!input || typeof input !== "object") return null;
+  const value = (input as ToolInputObject)[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
 const getAskUserQuestionSignature = (input?: AskUserQuestionInput | null) => {
   if (!input?.questions?.length) return "";
   return input.questions.map((question) => {
@@ -67,9 +78,16 @@ const StatusDot = ({ variant = "accent", isActive = false, isVisible = true }: {
   );
 };
 
+const InitInfoItem = ({ name, value }: { name: string; value: string }) => (
+  <div className="text-[14px]">
+    <span className="mr-4 font-normal">{name}</span>
+    <span className="font-light">{value}</span>
+  </div>
+);
 
 
-export function isMarkdown(text: string): boolean {
+
+function isMarkdown(text: string): boolean {
   if (!text || typeof text !== "string") return false;
   const patterns: RegExp[] = [/^#{1,6}\s+/m, /```[\s\S]*?```/];
   return patterns.some((pattern) => pattern.test(text));
@@ -172,11 +190,11 @@ const ToolCallCard = ({
   const getToolInfo = (): string | null => {
     const input = message.toolInput;
     switch (message.toolName) {
-      case "Bash": return (input as any)?.command || null;
-      case "Read": case "Write": case "Edit": return (input as any)?.file_path || null;
-      case "Glob": case "Grep": return (input as any)?.pattern || null;
-      case "Task": return (input as any)?.description || null;
-      case "WebFetch": return (input as any)?.url || null;
+      case "Bash": return getStringToolInput(input, "command");
+      case "Read": case "Write": case "Edit": return getStringToolInput(input, "file_path");
+      case "Glob": case "Grep": return getStringToolInput(input, "pattern");
+      case "Task": return getStringToolInput(input, "description");
+      case "WebFetch": return getStringToolInput(input, "url");
       default: return null;
     }
   };
@@ -228,13 +246,6 @@ const ToolCallCard = ({
 
 // Init Card
 const InitCard = ({ message, showIndicator = false }: { message: SDKInitMessage; showIndicator?: boolean }) => {
-  const InfoItem = ({ name, value }: { name: string; value: string }) => (
-    <div className="text-[14px]">
-      <span className="mr-4 font-normal">{name}</span>
-      <span className="font-light">{value}</span>
-    </div>
-  );
-  
   return (
     <div className="flex flex-col gap-2 mt-2">
       <div className="header text-accent flex items-center gap-2">
@@ -242,8 +253,8 @@ const InitCard = ({ message, showIndicator = false }: { message: SDKInitMessage;
         Session Started
       </div>
       <div className="flex flex-col rounded-xl px-4 py-2 border border-ink-900/10 bg-surface-secondary space-y-1">
-        <InfoItem name="Conversation ID" value={message.conversationId || "-"} />
-        <InfoItem name="Model" value={message.model || "-"} />
+        <InitInfoItem name="Conversation ID" value={message.conversationId || "-"} />
+        <InitInfoItem name="Model" value={message.model || "-"} />
       </div>
     </div>
   );

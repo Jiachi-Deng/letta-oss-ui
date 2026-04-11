@@ -7,7 +7,7 @@ import { getStaticData, pollResources, stopPolling } from "./test.js";
 import { bindResidentCoreService, cleanupAllSessions, handleClientEvent, residentCoreBroadcast } from "./ipc-handlers.js";
 import type { ClientEvent } from "./types.js";
 import { getAppConfigState, getResidentCoreLettaBotRuntimeConfig, saveAppConfig } from "./libs/config.js";
-import type { ResidentCoreLettaBotRuntimeConfig } from "./libs/config.js";
+import type { LettaAppConfig, ResidentCoreLettaBotRuntimeConfig } from "./libs/config.js";
 import {
     getBundledLettaServerRuntimeStatus,
 } from "./libs/bundled-letta-server.js";
@@ -52,6 +52,7 @@ let residentCoreSessionOwner: import("./libs/resident-core/session-owner.js").Re
 let residentCoreService: ReturnType<typeof createResidentCoreService> | null = null;
 let lettabotBackend: SessionBackend | null = null;
 let cleanupPromise: Promise<void> | null = null;
+let reloadPromise: Promise<void> | null = null;
 const mainLog = createComponentLogger("main");
 
 function maskTelegramToken(token?: string | null): string | null {
@@ -93,7 +94,7 @@ async function cleanupRuntime(): Promise<void> {
     return cleanupPromise;
 }
 
-async function reloadResidentCoreChannelsRuntime(): Promise<void> {
+async function reloadResidentCoreChannelsRuntimeUnsafe(): Promise<void> {
     if (!residentCoreSessionOwner || !residentCoreService) {
         throw new Error("Resident Core is not initialized");
     }
@@ -162,6 +163,18 @@ async function reloadResidentCoreChannelsRuntime(): Promise<void> {
     });
 }
 
+async function reloadResidentCoreChannelsRuntime(): Promise<void> {
+    if (reloadPromise) {
+        return reloadPromise;
+    }
+
+    reloadPromise = reloadResidentCoreChannelsRuntimeUnsafe().finally(() => {
+        reloadPromise = null;
+    });
+
+    return reloadPromise;
+}
+
 function handleSignal(): void {
     void cleanupRuntime().finally(() => app.exit(0));
 }
@@ -206,10 +219,10 @@ app.on("ready", () => {
     app.on("will-quit", () => {
         void cleanupRuntime();
     });
-    app.on("window-all-closed", ((event: Electron.Event) => {
-        event.preventDefault();
+    app.on("window-all-closed", (event?: Electron.Event) => {
+        event?.preventDefault();
         stopPolling();
-    }) as any);
+    });
     app.on("activate", () => {
         if (BrowserWindow.getAllWindows().length === 0) {
             createMainWindow();
@@ -267,21 +280,39 @@ app.on("ready", () => {
         return getAppConfigState();
     });
 
-    ipcMainHandle("get-diagnostic-summary", (_event, traceId: string) => {
-        return getDiagnosticSummary(traceId);
+    ipcMainHandle("get-diagnostic-summary", (_event, traceId) => {
+        return typeof traceId === "string" ? getDiagnosticSummary(traceId) : null;
     });
 
     ipcMainHandle("list-diagnostic-summaries", () => {
         return listDiagnosticSummaries();
     });
 
-    ipcMainHandle("get-latest-diagnostic-summary-for-session", (_event, sessionId: string) => {
-        return getLatestDiagnosticSummaryForSession(sessionId);
+    ipcMainHandle("get-latest-diagnostic-summary-for-session", (_event, sessionId) => {
+        return typeof sessionId === "string" ? getLatestDiagnosticSummaryForSession(sessionId) : null;
     });
 
     ipcMainHandle("save-app-config", async (_event, config) => {
-        const nextState = saveAppConfig(config);
-        await reloadResidentCoreChannelsRuntime();
+        const nextState = saveAppConfig(config as Partial<LettaAppConfig>);
+        try {
+            await reloadResidentCoreChannelsRuntime();
+        } catch (error) {
+            const message = `Settings saved, but channels runtime reload failed. Desktop core is still available; check your Telegram/channel configuration and retry. ${error instanceof Error ? error.message : String(error)}`;
+            mainLog({
+                level: "error",
+                decision_id: TG_RUNTIME_RELOAD_004,
+                error_code: E_TELEGRAM_RUNTIME_RELOAD_FAILED,
+                message: "save-app-config completed with channels runtime reload failure",
+                data: {
+                    error: error instanceof Error ? error.message : String(error),
+                    stack: error instanceof Error ? error.stack : undefined,
+                },
+            });
+            residentCoreBroadcast({
+                type: "runner.error",
+                payload: { message },
+            });
+        }
         return nextState;
     });
 
